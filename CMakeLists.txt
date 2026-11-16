@@ -24,7 +24,7 @@ function(bink2_set_compile_settings target)
   endif()
 endfunction()
 
-set(BINK2_DECODER_SOURCES src/bink2.c)
+set(BINK2_DECODER_SOURCES src/bink2.c src/bink2_bits.c)
 
 if(BINK2_BUILD_STATIC)
   add_library(bink2_static STATIC ${BINK2_DECODER_SOURCES})
