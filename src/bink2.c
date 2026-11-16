@@ -318,6 +318,66 @@ char bink2_enable_audio(bink2 object, unsigned char track,
     return 0;
 }
 
+int bink2_internal_load_frame(bink2 object, unsigned long frame)
+{
+    unsigned long start;
+    unsigned long nominal_end;
+    unsigned long size;
+    unsigned long pos;
+    int t;
+
+    if (object == NULL)
+        return BINK2_ERROR;
+    if (frame >= object->frame_count)
+        return BINK2_LAST;
+
+    start = object->frame_offsets[frame];
+    if (start >= object->actual_size)
+        return BINK2_LAST;
+    if (object->frame_sizes[frame] == 0)
+        return BINK2_ERROR;
+
+    nominal_end = start + object->frame_sizes[frame];
+    if (nominal_end < start || nominal_end > object->actual_size)
+        return BINK2_ERROR;
+    size = nominal_end - start;
+    if (size == 0)
+        return BINK2_ERROR;
+
+    if (size > object->frame_data_size) {
+        unsigned char *grown = (unsigned char *)realloc(object->frame_data,
+                                                        (size_t)size);
+
+        if (grown == NULL)
+            return BINK2_ERROR;
+        object->frame_data = grown;
+        object->frame_data_size = size;
+    }
+    if (read_at(object, start, object->frame_data, size) != 0)
+        return BINK2_ERROR;
+
+    pos = 0;
+    for (t = 0; t < object->audio_tracks; t++) {
+        unsigned long chunk;
+
+        if (pos + 4 > size)
+            return BINK2_ERROR;
+        chunk = le32(object->frame_data + pos);
+        pos += 4;
+        if (chunk > size - pos)
+            return BINK2_ERROR;
+        object->audio[t].payload = chunk != 0 ? object->frame_data + pos : NULL;
+        object->audio[t].payload_size = chunk;
+        pos += chunk;
+    }
+
+    object->video_data = object->frame_data + pos;
+    object->video_size = size - pos;
+    if (object->video_size == 0)
+        return BINK2_ERROR;
+    return BINK2_OK;
+}
+
 char bink2_first(bink2 object)
 {
     if (object == NULL)

@@ -62,4 +62,6 @@ struct bink2_t {
     struct Bink2Video *video;
 };
 
+int bink2_internal_load_frame(bink2 object, unsigned long frame);
+
 #endif
