@@ -135,6 +135,7 @@ src/
   bink2_internal.h         container and track state
   bink2.c                  open/info/enable/frame/seek
   bink2_bits.[ch]          LSB-first bit reader
+  bink2_tables.[ch]        VLC codebooks, scans, quantiser matrices
   bink2_dsp.[ch]           IDCT, motion compensation, block helpers
   bink2_video.[ch]         common video state, dispatch, planes, RGB
   bink2_video_old.c        KB2f path (from bink2f.c)
@@ -144,7 +145,7 @@ src/
     bink2_encoder.[ch]     public encoder API and file writer
     bink2_enc_video.c      mode decision, motion search, slices
     bink2_enc_dct.c        forward DCT and quantisation
-    bink2_enc_bits.[ch]    LSB-first bit writer
+    bink2_enc_bits.[ch]    bit counting helpers over the shared bit writer
     bink2_enc_image.c      stb_image loader
     bink2_enc_wav.c        WAV loader
   tools/
@@ -229,6 +230,7 @@ typedef struct {
     int quality;             /* 0..100, maps to quantiser bounds */
     int target_bitrate;      /* KiB/s, 0 = quality mode */
     int verify;              /* decode and compare after writing */
+    const char *recon_path;  /* optional raw YUV420 reconstruction dump */
     int verbose;
 } bink2_enc_options;
 
