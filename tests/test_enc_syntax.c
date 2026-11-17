@@ -195,6 +195,22 @@ static int test_acs(void)
     levels[bink2g_scan[63]] = 100;
     CHECK(ac_roundtrip(levels, 1) == 0);
 
+    /* A coefficient at scan position 63 ends the reader's loop without a
+     * terminator; the writer must not emit one. */
+    {
+        Bink2BitWriter bw;
+        Bink2Bits bits;
+        int32_t out[64];
+
+        bink2_bw_init(&bw);
+        bink2_write_acs(&bw, levels, bink2g_luma_intra_qmat, 0, 1);
+        bits = rewind_bits(&bw);
+        bink2_new_read_acs(&bits, out, bink2g_luma_intra_qmat, 0, 1);
+        CHECK(bink2_bits_failed(&bits) == 0);
+        CHECK(bits.bitpos == bink2_bw_bitpos(&bw));
+        bink2_bw_free(&bw);
+    }
+
     memset(levels, 0, sizeof(levels));
     levels[bink2g_scan[1]] = 1025;
     CHECK(ac_roundtrip(levels, 1) == 0);
