@@ -86,5 +86,9 @@ void bink2_video_predict_dc(Bink2Video *v, int is_luma, float mindc,
                             float maxdc, int flags, float tdc[16]);
 int bink2_video_slice_heights(int version, unsigned long flags,
                               unsigned long height, int heights[4]);
+void bink2_video_mc_luma(Bink2Video *v, int x, int y);
+void bink2_video_mc_chroma(Bink2Video *v, int x, int y);
+void bink2_video_copy_mb(Bink2Video *v, int x, int y);
+void bink2_video_store_motion(Bink2Video *v, int x, int y, int nb);
 
 #endif

@@ -27,7 +27,7 @@ static uint64_t plane_hash(bink2 b, int plane, int width, int height)
 
 static int test_slice_layout(void)
 {
-    int heights[4];
+    int heights[8];
 
     CHECK(bink2_video_slice_heights('g', 0, 96, heights) == 1);
     CHECK(heights[0] == 96);
@@ -59,15 +59,59 @@ int main(void)
         return skip;
     CHECK(bink2_info_video(b, &w, &h, NULL) == 0);
     CHECK(bink2_enable_video(b, 1) == 0);
-    status = bink2_first(b);
-    CHECK(status == BINK2_MORE || status == BINK2_LAST);
+    {
+        unsigned long frame;
+        unsigned long mbw = 0, mbh = 0;
+        const int16_t *mvx = NULL;
+        const int16_t *mvy = NULL;
+        const unsigned char *count = NULL;
 
-    CHECK(plane_hash(b, 0, (int)w, (int)h) == bink2_kb2g_checksums[0].y);
-    CHECK(plane_hash(b, 1, (int)((w + 1) / 2), (int)((h + 1) / 2)) ==
-          bink2_kb2g_checksums[0].u);
-    CHECK(plane_hash(b, 2, (int)((w + 1) / 2), (int)((h + 1) / 2)) ==
-          bink2_kb2g_checksums[0].v);
+        for (frame = 0; frame < 490; frame++) {
+            status = frame == 0 ? bink2_first(b) : bink2_next(b);
+            if (status == BINK2_ERROR) {
+                fprintf(stderr, "decode_g failed at frame %lu\n", frame);
+                return 1;
+            }
+            CHECK(plane_hash(b, 0, (int)w, (int)h) ==
+                  bink2_kb2g_checksums[frame].y);
+            CHECK(plane_hash(b, 1, (int)((w + 1) / 2),
+                             (int)((h + 1) / 2)) ==
+                  bink2_kb2g_checksums[frame].u);
+            CHECK(plane_hash(b, 2, (int)((w + 1) / 2),
+                             (int)((h + 1) / 2)) ==
+                  bink2_kb2g_checksums[frame].v);
+            if (frame == 1) {
+                CHECK(bink2_get_motion(b, &mbw, &mbh, &mvx, &mvy,
+                                       &count) == 1);
+                CHECK(mbw == (w + 31) / 32 && mbh == (h + 31) / 32);
+            }
+        }
+        CHECK(bink2_next(b) == BINK2_LAST);
+    }
 
+    bink2_close(b);
+
+    b = bink2_open_file(BINK2_FIXTURE_DIR "/synthetic_kb2j.bk2",
+                        BINK2_MODE_DISK);
+    CHECK(b != NULL);
+    CHECK(bink2_info_video(b, &w, &h, NULL) == 0);
+    CHECK(bink2_enable_video(b, 1) == 0);
+    {
+        unsigned long frame;
+
+        for (frame = 0; frame < 32; frame++) {
+            status = frame == 0 ? bink2_first(b) : bink2_next(b);
+            CHECK(status != BINK2_ERROR);
+            CHECK(plane_hash(b, 0, (int)w, (int)h) ==
+                  bink2_kb2j_checksums[frame].y);
+            CHECK(plane_hash(b, 1, (int)((w + 1) / 2),
+                             (int)((h + 1) / 2)) ==
+                  bink2_kb2j_checksums[frame].u);
+            CHECK(plane_hash(b, 2, (int)((w + 1) / 2),
+                             (int)((h + 1) / 2)) ==
+                  bink2_kb2j_checksums[frame].v);
+        }
+    }
     bink2_close(b);
     return 0;
 }

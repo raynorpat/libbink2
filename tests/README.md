@@ -27,3 +27,10 @@ the documented correctness target for `libbink2`.
 The decoded `ge_video_86l.bk2` luma spans 0–255 (not 16–235), so the
 library's default RGB conversion is full-range BT.601. `sc13` fades in from
 black; its first two frames are legitimately all zero.
+
+The script also builds the pinned independent encoder
+(`SBerda/bink2enc`, commit `dc40df9`) and writes
+`tests/media/synthetic_kb2j.bk2`: a 32-frame 160x120 `KB2j` clip with four
+slices. The encoder is used only as a fixture generator; no source from it
+enters the library. Its frames extend `reference_checksums.h` with
+`bink2_kb2j_checksums`.

@@ -318,7 +318,8 @@ precedence and skips the conversion.
   | --- | --- |
   | `KB2f`, 2 slices, DCT audio | golden-gated (partial sample) |
   | `KB2g`, 2 slices, stereo DCT audio | golden-gated |
-  | `KB2h`–`KB2n`, 3/8 slices, alpha, RDFT | best-effort; unit and decode-smoke tests only until media exists |
+  | `KB2j`, 4 slices, synthetic fixture | golden-gated (32 frames, bink2enc) |
+  | `KB2h`/`KB2k`–`KB2n`, 3/8 slices, alpha, RDFT | best-effort; unit and decode-smoke tests only until media exists |
 
   The h–n, alpha, and RDFT code is still implemented from the reference and
   exercised by synthetic/unit tests, but the design does not claim bit-exact

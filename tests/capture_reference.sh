@@ -46,6 +46,27 @@ done
 "$ORACLE" -v error -i "$MEDIA/ge_video_86l.bk2" -map 0:a:0 \
     -c:a pcm_s16le -f s16le - > "$OUT/ge_a0.s16" 2>>"$OUT/audio.log"
 
+# Synthetic KB2j fixture, produced by the pinned independent encoder.
+BINK2ENC=${BINK2ENC_BIN:-$ORACLE_DIR/bink2enc/target/release/bink2enc}
+if [ ! -x "$BINK2ENC" ]; then
+    if [ ! -d "$ORACLE_DIR/bink2enc" ]; then
+        git clone --quiet https://github.com/SBerda/bink2enc.git \
+            "$ORACLE_DIR/bink2enc"
+    fi
+    (
+        cd "$ORACLE_DIR/bink2enc"
+        git checkout --quiet dc40df99613a5df543b4fd19ca0214912cb53646
+        cargo build --release
+    )
+    BINK2ENC=$ORACLE_DIR/bink2enc/target/release/bink2enc
+fi
+python3 "$ROOT/tests/make_clip.py" -o "$OUT/clip160.yuv" \
+    --width 160 --height 120 --frames 32
+"$BINK2ENC" -w 160 -h 120 -fps 25 -gop 16 \
+    -o "$ROOT/tests/media/synthetic_kb2j.bk2" "$OUT/clip160.yuv" >/dev/null
+"$ORACLE" -v error -i "$ROOT/tests/media/synthetic_kb2j.bk2" \
+    -f rawvideo -pix_fmt yuv420p - > "$OUT/kb2j.yuv"
+
 {
     echo '#ifndef LIBBINK2_REFERENCE_CHECKSUMS_H'
     echo '#define LIBBINK2_REFERENCE_CHECKSUMS_H'
@@ -90,6 +111,12 @@ done
     python3 "$ROOT/tests/checksum_frames.py" --kind audio \
         --input "$OUT/ge_a0.s16" --channels 2 --prefix-samples 20000 \
         --prefix-out "$ROOT/tests/media/kb2g_a0_10f.s16"
+    echo '};'
+    echo
+    echo '/* Synthetic KB2j, 160x120, 32 frames, produced by bink2enc. */'
+    echo 'static const Bink2FrameChecksum bink2_kb2j_checksums[] = {'
+    python3 "$ROOT/tests/checksum_frames.py" --kind video \
+        --input "$OUT/kb2j.yuv" --width 160 --height 120 --frames 32
     echo '};'
     echo
     echo '#endif'

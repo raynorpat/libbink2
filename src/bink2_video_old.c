@@ -749,7 +749,7 @@ static int old_decode_mv(Bink2Bits *bits, int flags, int mv[4][2])
     return 0;
 }
 
-static void old_mcompensate_luma(Bink2Video *v, int x, int y)
+void bink2_video_mc_luma(Bink2Video *v, int x, int y)
 {
     int32_t *mv = v->old_mv_cur + v->old_mb_pos * 8;
     int k;
@@ -765,7 +765,7 @@ static void old_mcompensate_luma(Bink2Video *v, int x, int y)
     }
 }
 
-static void old_mcompensate_chroma(Bink2Video *v, int x, int y)
+void bink2_video_mc_chroma(Bink2Video *v, int x, int y)
 {
     int32_t *mv = v->old_mv_cur + v->old_mb_pos * 8;
     int k;
@@ -898,7 +898,7 @@ static int old_decode_inter_chroma(Bink2Video *v, Bink2Bits *bits,
     return 0;
 }
 
-static void old_copy_macroblock(Bink2Video *v, int x, int y)
+void bink2_video_copy_mb(Bink2Video *v, int x, int y)
 {
     int r;
 
@@ -918,7 +918,7 @@ static void old_copy_macroblock(Bink2Video *v, int x, int y)
     }
 }
 
-static void old_store_motion(Bink2Video *v, int x, int y)
+void bink2_video_store_motion(Bink2Video *v, int x, int y, int nb)
 {
     size_t mb = (size_t)(y / 32) * v->mb_w + x / 32;
     int32_t *mv = v->old_mv_cur + v->old_mb_pos * 8;
@@ -928,7 +928,7 @@ static void old_store_motion(Bink2Video *v, int x, int y)
         v->mv[0][mb * 4 + k] = (int16_t)mv[k * 2];
         v->mv[1][mb * 4 + k] = (int16_t)mv[k * 2 + 1];
     }
-    v->mv_count[mb] = 4;
+    v->mv_count[mb] = (unsigned char)nb;
 }
 
 int bink2_video_decode_slice_old(Bink2Video *v, Bink2Bits *bits,
@@ -1077,16 +1077,16 @@ int bink2_video_decode_slice_old(Bink2Video *v, Bink2Bits *bits,
                 }
                 break;
             case 1:
-                old_copy_macroblock(v, x, y);
+                bink2_video_copy_mb(v, x, y);
                 break;
             case 2:
             case 3:
                 if (old_decode_mv(bits, flags, raw) != 0)
                     return BINK2_ERROR;
                 old_predict_mv(v, flags, raw);
-                old_mcompensate_luma(v, x, y);
-                old_mcompensate_chroma(v, x, y);
-                old_store_motion(v, x, y);
+                bink2_video_mc_luma(v, x, y);
+                bink2_video_mc_chroma(v, x, y);
+                bink2_video_store_motion(v, x, y, 4);
                 if (type == 3) {
                     v->old_comp = 0;
                     if (old_decode_inter_luma(v, bits, &y_cbp_inter,
