@@ -35,12 +35,8 @@ static const uint8_t old_ac_skip_bits[2][NUM_AC_SKIPS] = {
 static const uint8_t old_skips[] = {
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 62, 0, 0, 0,
 };
-static const uint8_t next_skips[] = {
-    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0,
-};
-static const uint8_t luma_repos[] = {
-    0, 1, 4, 5, 2, 3, 6, 7, 8, 9, 12, 13, 10, 11, 14, 15,
-};
+#define next_skips bink2_next_skips
+#define luma_repos bink2_luma_repos
 static const uint8_t q_dc_bits[16] = {
     1, 1, 1, 1, 1, 1, 1, 2, 2, 2, 3, 3, 4, 4, 5, 6,
 };
@@ -308,8 +304,8 @@ static float dc_mpred2(float a, float b)
     return v < lo ? lo : v > hi ? hi : v;
 }
 
-static void old_predict_dc(Bink2Video *v, int is_luma, float mindc,
-                           float maxdc, int flags, float tdc[16])
+void bink2_video_predict_dc(Bink2Video *v, int is_luma, float mindc,
+                            float maxdc, int flags, float tdc[16])
 {
     int mb = v->old_mb_pos;
     int comp = v->old_comp;
@@ -475,7 +471,7 @@ static int old_decode_dc(Bink2Video *v, Bink2Bits *bits, int is_luma, int q,
     for (i = 0; i < num_dc; i++)
         tdc[i] *= dc_quant[q];
 
-    old_predict_dc(v, is_luma, (float)mindc, (float)maxdc, flags, tdc);
+    bink2_video_predict_dc(v, is_luma, (float)mindc, (float)maxdc, flags, tdc);
     return 0;
 }
 

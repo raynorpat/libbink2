@@ -3,6 +3,13 @@
 #include <stdlib.h>
 #include <string.h>
 
+const uint8_t bink2_luma_repos[16] = {
+    0, 1, 4, 5, 2, 3, 6, 7, 8, 9, 12, 13, 10, 11, 14, 15
+};
+const uint8_t bink2_next_skips[16] = {
+    0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0
+};
+
 static int clip8(int v)
 {
     if (v < 0)
@@ -118,6 +125,7 @@ int bink2_video_init(Bink2Video *v, unsigned long width, unsigned long height,
     v->aligned_w = (width + 31) & ~31UL;
     v->aligned_h = (height + 31) & ~31UL;
     v->version = version;
+    v->flags = flags;
     v->has_alpha = (flags & BINK2_FLAG_ALPHA) ? 1 : 0;
     v->range = BINK2_RANGE_FULL;
 
@@ -164,11 +172,16 @@ int bink2_video_init(Bink2Video *v, unsigned long width, unsigned long height,
                                       sizeof(int32_t));
     v->old_mv_prev = (int32_t *)calloc(((size_t)v->mb_w + 1) * 8,
                                        sizeof(int32_t));
+    v->new_q_cur = (Bink2Quant *)calloc((size_t)v->mb_w + 1,
+                                        sizeof(Bink2Quant));
+    v->new_q_prev = (Bink2Quant *)calloc((size_t)v->mb_w + 1,
+                                         sizeof(Bink2Quant));
     v->rgb_size = (size_t)width * height * 3;
     v->rgb = (unsigned char *)calloc(1, v->rgb_size);
     if (v->mv[0] == NULL || v->mv[1] == NULL || v->mv_count == NULL ||
         v->old_dc_cur == NULL || v->old_dc_prev == NULL ||
         v->old_mv_cur == NULL || v->old_mv_prev == NULL ||
+        v->new_q_cur == NULL || v->new_q_prev == NULL ||
         v->rgb == NULL) {
         bink2_video_uninit(v);
         return -1;
@@ -193,6 +206,8 @@ void bink2_video_uninit(Bink2Video *v)
     free(v->old_dc_prev);
     free(v->old_mv_cur);
     free(v->old_mv_prev);
+    free(v->new_q_cur);
+    free(v->new_q_prev);
     free(v->rgb);
     memset(v, 0, sizeof(*v));
 }
@@ -219,10 +234,48 @@ void bink2_video_reset(Bink2Video *v)
     memset(v->old_dc_prev, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2OldDc));
     memset(v->old_mv_cur, 0, ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
     memset(v->old_mv_prev, 0, ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
+    memset(v->new_q_cur, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
+    memset(v->new_q_prev, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
     v->old_mb_pos = 0;
     v->old_comp = 0;
     v->has_prev = 0;
     v->rgb_valid = 0;
+}
+
+int bink2_video_slice_heights(int version, unsigned long flags,
+                              unsigned long height, int heights[4])
+{
+    unsigned long aligned_h = (height + 31) & ~31UL;
+
+    if (version <= 'f') {
+        heights[0] = (int)(((height / 2 + 16) & ~31UL));
+        heights[1] = (int)aligned_h;
+        return 2;
+    }
+    if (version == 'g') {
+        if (aligned_h < 128) {
+            heights[0] = (int)aligned_h;
+            return 1;
+        }
+        heights[0] = (int)(((height / 2 + 16) & ~31UL));
+        heights[1] = (int)aligned_h;
+        return 2;
+    }
+    {
+        static const int slice_counts[4] = { 2, 3, 4, 8 };
+        int n = slice_counts[flags & 3];
+        int start = 0;
+        int end = (int)aligned_h + 32 * n - 1;
+        int i;
+
+        for (i = 0; i < n - 1; i++) {
+            start += ((end - start) / (n - i)) & ~31;
+            end -= 32;
+            heights[i] = start;
+        }
+        heights[n - 1] = (int)aligned_h;
+        return n;
+    }
 }
 
 int bink2_video_decode(Bink2Video *v, const unsigned char *data, size_t size,
@@ -236,12 +289,9 @@ int bink2_video_decode(Bink2Video *v, const unsigned char *data, size_t size,
 
     if (v == NULL || data == NULL || size < 8)
         return BINK2_ERROR;
-    if (v->version > 'f') {
-        /* The newer bitstream path lands in Task 9. */
-        return BINK2_ERROR;
-    }
 
     frame_flags = le32(data);
+    v->frame_flags = frame_flags;
     v->rgb_valid = 0;
     memset(v->mv[0], 0, v->mv_capacity * sizeof(int16_t));
     memset(v->mv[1], 0, v->mv_capacity * sizeof(int16_t));
@@ -252,9 +302,8 @@ int bink2_video_decode(Bink2Video *v, const unsigned char *data, size_t size,
     bink2_bits_init(&bits, data, size);
     bink2_bits_skip(&bits, 32);
 
-    num_slices = 2;
-    slice_height[0] = (int)(((v->height / 2 + 16) & ~31UL));
-    slice_height[1] = (int)v->aligned_h;
+    num_slices = bink2_video_slice_heights(v->version, v->flags, v->height,
+                                          slice_height);
 
     bink2_bits_skip(&bits, 32 * (num_slices - 1));
     if (frame_flags & 0x10000) {
@@ -285,8 +334,15 @@ int bink2_video_decode(Bink2Video *v, const unsigned char *data, size_t size,
                 return BINK2_ERROR;
             bink2_bits_skip(&bits, (int)(target - bits.bitpos));
         }
-        if (bink2_video_decode_slice_old(v, &bits, is_keyframe, y0, y1) != 0)
-            return BINK2_ERROR;
+        if (v->version <= 'f') {
+            if (bink2_video_decode_slice_old(v, &bits, is_keyframe,
+                                             y0, y1) != 0)
+                return BINK2_ERROR;
+        } else {
+            if (bink2_video_decode_slice_new(v, &bits, is_keyframe,
+                                             y0, y1) != 0)
+                return BINK2_ERROR;
+        }
     }
 
     for (i = 0; i < 4; i++) {

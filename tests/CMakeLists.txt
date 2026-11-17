@@ -22,3 +22,8 @@ add_executable(test_decode_f test_decode_f.c)
 target_link_libraries(test_decode_f PRIVATE ${BINK2_LINK_TARGET})
 add_test(NAME decode_f COMMAND test_decode_f)
 set_tests_properties(decode_f PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(test_decode_g test_decode_g.c)
+target_link_libraries(test_decode_g PRIVATE ${BINK2_LINK_TARGET})
+add_test(NAME decode_g COMMAND test_decode_g)
+set_tests_properties(decode_g PROPERTIES SKIP_RETURN_CODE 77)
