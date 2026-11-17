@@ -64,6 +64,8 @@ static int ppm_uint(FILE *fp, unsigned *out)
         return -1;
     while (isdigit(ch)) {
         value = value * 10u + (unsigned)(ch - '0');
+        if (value > 1000000u)
+            return -1;
         digits++;
         ch = fgetc(fp);
     }

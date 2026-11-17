@@ -443,29 +443,6 @@ static int input_open(const char *path, int directory, build_input *input)
     return 0;
 }
 
-static int verify_output(const char *path, unsigned long frames)
-{
-    bink2 b = bink2_open_file(path, BINK2_MODE_DISK);
-    unsigned long count = 0;
-    unsigned long f;
-    int ok = 1;
-
-    if (b == NULL)
-        return -1;
-    if (bink2_info_all(b, NULL, &count, NULL) != 0 || count != frames)
-        ok = 0;
-    if (ok) {
-        bink2_enable_video(b, 1);
-        if (bink2_first(b) == BINK2_ERROR)
-            ok = 0;
-        for (f = 1; ok && f < count; f++)
-            if (bink2_next(b) == BINK2_ERROR)
-                ok = 0;
-    }
-    bink2_close(b);
-    return ok ? 0 : -1;
-}
-
 int main(int argc, char **argv)
 {
     bink2_enc_options options;
@@ -580,6 +557,7 @@ int main(int argc, char **argv)
     source.fps_den = fps_den;
     source.read_frame = input_read_frame;
     options.recon_path = recon;
+    options.verify = verify;
 
     if (verbose)
         fprintf(stderr, "bink2_build: encoding %s\n", image_input);
@@ -589,11 +567,6 @@ int main(int argc, char **argv)
             fprintf(stderr, "bink2_build: %s\n", err);
         input_close(&input);
         return status;
-    }
-    if (verify && verify_output(output, input.count) != 0) {
-        fprintf(stderr, "bink2_build: verification failed\n");
-        input_close(&input);
-        return BINK2_ENC_ERR_VERIFY;
     }
     if (verbose)
         fprintf(stderr, "bink2_build: wrote %s\n", output);

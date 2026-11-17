@@ -236,6 +236,30 @@ int bink2_me_sad(const Bink2Frame *src, const Bink2Frame *ref, int mbx,
     return sad;
 }
 
+void bink2_enc_invert_mv(Bink2Video *v, int flags, const Bink2Mv desired[4],
+                         int nb, int raw[4][2])
+{
+    static const int first_row_order[4] = { 0, 2, 1, 3 };
+    const int *order = ((flags & 0x80) && !(flags & 0x20))
+                           ? first_row_order : NULL;
+    int raws[4][2] = { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
+    int predicted[4][2];
+    int step;
+
+    for (step = 0; step < nb; step++) {
+        int j = order != NULL ? order[step] : step;
+
+        bink2_enc_predict_mv(v, flags, raws, nb, predicted);
+        raws[j][0] = desired[j].x - predicted[j][0];
+        raws[j][1] = desired[j].y - predicted[j][1];
+    }
+    bink2_enc_predict_mv(v, flags, raws, nb, predicted);
+    for (step = 0; step < 4; step++) {
+        raw[step][0] = raws[step][0];
+        raw[step][1] = raws[step][1];
+    }
+}
+
 static int sad16_for_mv(const Bink2Frame *src, const Bink2Frame *ref, int x,
                         int y, int mvx, int mvy)
 {

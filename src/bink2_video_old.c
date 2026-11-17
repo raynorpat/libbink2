@@ -769,11 +769,11 @@ void bink2_video_mc_chroma(Bink2Video *v, int x, int y)
 
         bink2_mc_chroma(v->cur[2] + (size_t)by * v->stride[2] + bx,
                         v->stride[2], v->ref[2], v->stride[2],
-                        bx, by, (int)v->width / 2, (int)v->height / 2,
+                        bx, by, v->plane_w[1], v->plane_h[1],
                         mv[k * 2], mv[k * 2 + 1]);
         bink2_mc_chroma(v->cur[1] + (size_t)by * v->stride[1] + bx,
                         v->stride[1], v->ref[1], v->stride[1],
-                        bx, by, (int)v->width / 2, (int)v->height / 2,
+                        bx, by, v->plane_w[1], v->plane_h[1],
                         mv[k * 2], mv[k * 2 + 1]);
     }
 }

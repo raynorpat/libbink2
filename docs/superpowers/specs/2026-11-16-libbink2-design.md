@@ -233,7 +233,7 @@ typedef struct {
     int slices;              /* 2, 3, 4, or 8; default 2 */
     int four_mv;             /* allow four vectors per macroblock */
     int quality;             /* 0..100, maps to quantiser bounds */
-    int target_bitrate;      /* KiB/s, 0 = quality mode */
+    int target_bitrate;      /* bits per second, 0 = quality mode */
     int verify;              /* decode and compare after writing */
     const char *recon_path;  /* optional raw YUV420 reconstruction dump */
     int verbose;
@@ -326,7 +326,11 @@ precedence and skips the conversion.
   The h–n and RDFT code is still implemented from the reference and exercised
   by synthetic/unit tests, but the design does not claim bit-exact
   verification for those paths. `KB2g`+ alpha is deliberately rejected
-  because the residual, motion, and intra-DC alpha syntax is not ported. No further `.bk2` media is available as of
+  because the residual, motion, and intra-DC alpha syntax is not ported.
+
+  The pinned FFmpeg oracle has a `slice_height[4]` array bug in its 8-slice
+  path and rejects valid 8-slice files; oracle validation covers 2/3/4
+  slices. 8-slice output is gated by the library's own decoder round trip. No further `.bk2` media is available as of
   this design. Adding a sample moves a row into the golden-gated set without a
   design change.
 - **Optional cross-check:** decode the same files with NihAV and compare plane

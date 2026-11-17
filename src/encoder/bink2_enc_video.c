@@ -99,11 +99,11 @@ static int quantise_dc(int desired, int prediction, int q)
         return 0;
     cnt = (int)(((int64_t)raw * 1024 +
                  (raw >= 0 ? pat / 2 : -pat / 2)) / pat);
-    value = (int64_t)cnt * pat;
-    /* Match the decoder's (value + 0x200) >> 10, including negatives. */
+    value = (int64_t)cnt * pat + 0x200;
+    /* Floor division by 1024, matching the decoder's arithmetic shift. */
     if (value >= 0)
-        return (int)((value + 0x200) >> 10);
-    return -(int)(((-value) + 0x200) >> 10);
+        return (int)(value >> 10);
+    return -(int)((-value + 1023) >> 10);
 }
 
 static void encode_dc_block(Bink2Video *v, int is_luma, int comp, int count,
@@ -334,6 +334,7 @@ static int encode_slice(Bink2BitWriter *bw, Bink2Video *v, Bink2Frame *src,
             encode_luma(bw, v, src, x, y, flags, q, &prev_y);
             encode_chroma(bw, v, src, 2, 1, x, y, flags, q, &prev_v);
             encode_chroma(bw, v, src, 1, 2, x, y, flags, q, &prev_u);
+            bink2_enc_count_block(0);
         }
 
         {
@@ -577,7 +578,6 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
             int nb = 1;
             int type;
             int raw[4][2] = { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
-            int predicted[4][2];
             int sad;
 
             if (y == y0)
@@ -601,16 +601,7 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
             }
             bink2_me_search(src, ref, x, y, range, four_mv, mv, &nb);
 
-            {
-                int j;
-
-                for (j = 0; j < nb; j++) {
-                    bink2_enc_predict_mv(v, flags, raw, nb, predicted);
-                    raw[j][0] = mv[j].x - predicted[j][0];
-                    raw[j][1] = mv[j].y - predicted[j][1];
-                }
-                bink2_enc_predict_mv(v, flags, raw, nb, predicted);
-            }
+            bink2_enc_invert_mv(v, flags, mv, nb, raw);
             bink2_video_mc_luma(v, x, y);
             bink2_video_mc_chroma(v, x, y);
             sad = block_sad(src, v, x, y);

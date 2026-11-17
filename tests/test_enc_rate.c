@@ -64,6 +64,50 @@ static long file_size(const char *path)
     return size;
 }
 
+static int compare_recon(const char *path, const char *recon_path,
+                         unsigned long frames)
+{
+    FILE *recon = fopen(recon_path, "rb");
+    bink2 b;
+    unsigned char *ref;
+    int cw = (TEST_WIDTH + 1) / 2;
+    int ch = (TEST_HEIGHT + 1) / 2;
+    size_t y_size = (size_t)TEST_WIDTH * TEST_HEIGHT;
+    size_t c_size = (size_t)cw * ch;
+    unsigned long f;
+    int row;
+
+    CHECK(recon != NULL);
+    ref = (unsigned char *)malloc(y_size + c_size * 2);
+    CHECK(ref != NULL);
+    b = bink2_open_file(path, BINK2_MODE_DISK);
+    CHECK(b != NULL);
+    CHECK(bink2_enable_video(b, 1) == 0);
+    for (f = 0; f < frames; f++) {
+        int status = f == 0 ? bink2_first(b) : bink2_next(b);
+        int plane;
+
+        CHECK(status != BINK2_ERROR);
+        for (plane = 0; plane < 3; plane++) {
+            const unsigned char *decoded = bink2_get_plane(b, plane);
+            int stride = bink2_get_stride(b, plane);
+            int pw = plane == 0 ? TEST_WIDTH : cw;
+            int ph = plane == 0 ? TEST_HEIGHT : ch;
+            size_t size = plane == 0 ? y_size : c_size;
+
+            CHECK(decoded != NULL);
+            CHECK(fread(ref, 1, size, recon) == size);
+            for (row = 0; row < ph; row++)
+                CHECK(memcmp(decoded + (size_t)row * stride,
+                             ref + (size_t)row * pw, (size_t)pw) == 0);
+        }
+    }
+    bink2_close(b);
+    free(ref);
+    fclose(recon);
+    return 0;
+}
+
 static double frame_psnr(const char *path, unsigned long target,
                          const SourceCtx *ctx)
 {
@@ -158,6 +202,9 @@ int main(void)
     low_size = file_size("test_rate_low.bk2");
     high_size = file_size("test_rate_high.bk2");
     CHECK(low_size > 0 && high_size > low_size);
+    CHECK(compare_recon("test_rate_low.bk2", "test_rate_low.yuv", 120) == 0);
+    CHECK(compare_recon("test_rate_high.bk2", "test_rate_high.yuv", 120) ==
+          0);
     low_psnr = frame_psnr("test_rate_low.bk2", 60, &ctx);
     high_psnr = frame_psnr("test_rate_high.bk2", 60, &ctx);
     CHECK(high_psnr > low_psnr);
@@ -165,13 +212,17 @@ int main(void)
     /* Bitrate mode: within 25% of 100 KiB/s over the clip duration. */
     CHECK(encode("test_rate_bitrate.bk2", "test_rate_bitrate.yuv", 120, 80,
                  100 * 1024 * 8, 150, -1) == BINK2_ENC_OK);
+    CHECK(compare_recon("test_rate_bitrate.bk2", "test_rate_bitrate.yuv",
+                        120) == 0);
     rate_size = file_size("test_rate_bitrate.bk2");
     target_size = 100.0 * 1024.0 * 120.0 / TEST_FPS;
     CHECK(rate_size > target_size * 0.75 && rate_size < target_size * 1.25);
 
     /* Scene cut: the black frame becomes a keyframe. */
-    CHECK(encode("test_rate_scene.bk2", NULL, 61, 80, 0, 150, 60) ==
-          BINK2_ENC_OK);
+    CHECK(encode("test_rate_scene.bk2", "test_rate_scene.yuv", 61, 80, 0,
+                 150, 60) == BINK2_ENC_OK);
+    CHECK(compare_recon("test_rate_scene.bk2", "test_rate_scene.yuv", 61) ==
+          0);
     CHECK(index_is_key("test_rate_scene.bk2", 0) == 1);
     CHECK(index_is_key("test_rate_scene.bk2", 59) == 0);
     CHECK(index_is_key("test_rate_scene.bk2", 60) == 1);
@@ -182,12 +233,18 @@ int main(void)
         static const unsigned keyints[1] = { 150 };
         static const int qualities[1] = { 80 };
 
-        CHECK(encode("test_rate_extreme.bk2", NULL, 5, 80, bitrates[0],
-                     keyints[0], -1) == BINK2_ENC_OK);
-        CHECK(encode("test_rate_extreme.bk2", NULL, 5, 80, 0, 0, -1) ==
-              BINK2_ENC_OK);
-        CHECK(encode("test_rate_extreme.bk2", NULL, 5, qualities[0], 0, 150,
-                     -1) == BINK2_ENC_OK);
+        CHECK(encode("test_rate_extreme.bk2", "test_rate_extreme.yuv", 5,
+                     80, bitrates[0], keyints[0], -1) == BINK2_ENC_OK);
+        CHECK(compare_recon("test_rate_extreme.bk2",
+                            "test_rate_extreme.yuv", 5) == 0);
+        CHECK(encode("test_rate_extreme.bk2", "test_rate_extreme.yuv", 5,
+                     80, 0, 0, -1) == BINK2_ENC_OK);
+        CHECK(compare_recon("test_rate_extreme.bk2",
+                            "test_rate_extreme.yuv", 5) == 0);
+        CHECK(encode("test_rate_extreme.bk2", "test_rate_extreme.yuv", 5,
+                     qualities[0], 0, 150, -1) == BINK2_ENC_OK);
+        CHECK(compare_recon("test_rate_extreme.bk2",
+                            "test_rate_extreme.yuv", 5) == 0);
         for (i = 0; i < 3; i++) {
             bink2 b = bink2_open_file("test_rate_extreme.bk2",
                                       BINK2_MODE_DISK);
@@ -208,6 +265,8 @@ int main(void)
     remove("test_rate_bitrate.bk2");
     remove("test_rate_bitrate.yuv");
     remove("test_rate_scene.bk2");
+    remove("test_rate_scene.yuv");
     remove("test_rate_extreme.bk2");
+    remove("test_rate_extreme.yuv");
     return 0;
 }

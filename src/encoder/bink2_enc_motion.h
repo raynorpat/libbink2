@@ -21,8 +21,11 @@ const Bink2EncStats *bink2_enc_last_stats(void);
 void bink2_enc_reset_stats(void);
 void bink2_enc_count_block(int type);
 
-/** Replicates the decoder's KB2g+ one-vector MV predictor. */
+/** Replicates the decoder's KB2g+ MV predictor (one or four vectors). */
 void bink2_enc_predict_mv(Bink2Video *v, int flags, const int raw[4][2],
                           int nb, int out[4][2]);
+/** Invert the predictor for the desired vectors, respecting its dependency order. */
+void bink2_enc_invert_mv(Bink2Video *v, int flags, const Bink2Mv desired[4],
+                         int nb, int raw[4][2]);
 
 #endif

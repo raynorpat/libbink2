@@ -65,6 +65,26 @@ static int check_plane(bink2 b, int plane, const unsigned char *ref, int width,
     return 0;
 }
 
+static int test_mv_inversion(void)
+{
+    Bink2Video v;
+    Bink2Mv desired[4] = { { 2, 0 }, { 4, 0 }, { 6, 0 }, { 8, 0 } };
+    int raw[4][2];
+    int predicted[4][2];
+    int k;
+
+    CHECK(bink2_video_init(&v, 64, 64, 0, 'j') == 0);
+    v.old_mb_pos = 1;
+    bink2_enc_invert_mv(&v, 0x80, desired, 4, raw);
+    bink2_enc_predict_mv(&v, 0x80, raw, 4, predicted);
+    for (k = 0; k < 4; k++) {
+        CHECK(predicted[k][0] == desired[k].x);
+        CHECK(predicted[k][1] == desired[k].y);
+    }
+    bink2_video_uninit(&v);
+    return 0;
+}
+
 static int has_nonzero_motion(bink2 b)
 {
     unsigned long mbw = 0, mbh = 0;

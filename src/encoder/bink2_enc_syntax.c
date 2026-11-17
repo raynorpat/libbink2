@@ -105,6 +105,8 @@ static int popcount16(uint32_t value)
     return count;
 }
 
+/* The format can represent cbp high halves of 0 or lo; callers only pass
+ * those (the encoder always uses lo == 0xFFFF). */
 void bink2_write_cbp_luma(Bink2BitWriter *bw, uint32_t prev_cbp,
                           uint32_t edge, uint32_t cbp)
 {

@@ -113,6 +113,57 @@ static int write_recon(FILE *file, const Bink2Frame *frame)
     return 0;
 }
 
+static int verify_written(FILE *file, FILE *recon, int width, int height,
+                          unsigned long frames)
+{
+    bink2 b;
+    unsigned char *ref;
+    int cw = (width + 1) / 2;
+    int ch = (height + 1) / 2;
+    size_t y_size = (size_t)width * height;
+    size_t c_size = (size_t)cw * ch;
+    unsigned long f;
+    int ok = 1;
+
+    ref = (unsigned char *)malloc(y_size + c_size * 2);
+    if (ref == NULL)
+        return -1;
+    b = bink2_open_filepointer(file, BINK2_MODE_DISK);
+    if (b == NULL) {
+        free(ref);
+        return -1;
+    }
+    bink2_enable_video(b, 1);
+    for (f = 0; ok && f < frames; f++) {
+        int status = f == 0 ? bink2_first(b) : bink2_next(b);
+        int plane;
+
+        if (status == BINK2_ERROR)
+            ok = 0;
+        for (plane = 0; ok && plane < 3; plane++) {
+            const unsigned char *decoded = bink2_get_plane(b, plane);
+            int stride = bink2_get_stride(b, plane);
+            int pw = plane == 0 ? width : cw;
+            int ph = plane == 0 ? height : ch;
+            size_t size = plane == 0 ? y_size : c_size;
+            int row;
+
+            if (decoded == NULL ||
+                fread(ref, 1, size, recon) != size) {
+                ok = 0;
+                break;
+            }
+            for (row = 0; ok && row < ph; row++)
+                if (memcmp(decoded + (size_t)row * stride,
+                           ref + (size_t)row * pw, (size_t)pw) != 0)
+                    ok = 0;
+        }
+    }
+    bink2_close(b);
+    free(ref);
+    return ok ? 0 : -1;
+}
+
 int bink2_enc_encode_intra(const bink2_enc_source *source,
                            const bink2_enc_options *options, FILE *file,
                            short *quality)
@@ -127,10 +178,13 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
     Bink2Frame frame;
     Bink2Video state;
     FILE *recon = NULL;
+    FILE *verify_recon = NULL;
     unsigned long f;
     unsigned char *previous = NULL;
     int frame_q;
     long target_bytes = 0;
+    int verify_failed = 0;
+    int input_failed = 0;
     int rc = -1;
 
     if (source == NULL || options == NULL || file == NULL)
@@ -160,6 +214,11 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
     if (options->recon_path != NULL) {
         recon = fopen(options->recon_path, "wb");
         if (recon == NULL)
+            goto done;
+    }
+    if (options->verify) {
+        verify_recon = tmpfile();
+        if (verify_recon == NULL)
             goto done;
     }
     offsets = (unsigned long *)calloc(source->frame_count + 1,
@@ -199,6 +258,7 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
         int scene_cut = 0;
 
         if (bink2_enc_read_frame(source, f, &frame) != 0) {
+            input_failed = 1;
             bink2_video_uninit(&state);
             bink2_frame_free(&frame);
             goto done;
@@ -234,7 +294,7 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
         }
         bytes = bink2_bw_bytes(&bw);
         offset = ftell(file);
-        if (offset < 0 ||
+        if (offset < 0 || (unsigned long)offset > 0xFFFFFFFFUL - bytes ||
             fwrite(bink2_bw_data(&bw), 1, bytes, file) != bytes) {
             bink2_bw_free(&bw);
             bink2_video_uninit(&state);
@@ -269,6 +329,15 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
             bink2_frame_free(&frame);
             goto done;
         }
+        if (verify_recon != NULL && write_recon(verify_recon, &frame) != 0) {
+            bink2_bw_free(&bw);
+            bink2_video_uninit(&state);
+            bink2_frame_free(&frame);
+            goto done;
+        }
+        if (options->verbose)
+            fprintf(stderr, "bink2 encoder: frame %lu/%lu\n", f + 1,
+                    source->frame_count);
         bink2_bw_free(&bw);
     }
     end = (unsigned long)ftell(file);
@@ -286,6 +355,15 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
         bink2_frame_free(&frame);
         goto done;
     }
+    if (verify_recon != NULL) {
+        fflush(file);
+        fflush(verify_recon);
+        if (fseek(verify_recon, 0, SEEK_SET) != 0 ||
+            verify_written(file, verify_recon, source->width, source->height,
+                           source->frame_count) != 0)
+            verify_failed = 1;
+        fseek(file, 0, SEEK_END);
+    }
     if (quality != NULL)
         *quality = (short)frame_q;
     bink2_video_uninit(&state);
@@ -295,9 +373,15 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
 done:
     if (recon != NULL)
         fclose(recon);
+    if (verify_recon != NULL)
+        fclose(verify_recon);
     free(previous);
     free(offsets);
     free(keys);
+    if (verify_failed)
+        return BINK2_ENC_ERR_VERIFY;
+    if (input_failed)
+        return BINK2_ENC_ERR_INPUT;
     if (rc != 0)
         return BINK2_ENC_ERR_ENCODE;
     return BINK2_ENC_OK;
@@ -342,6 +426,14 @@ bink2_enc_status bink2_enc_encode(const bink2_enc_source *source,
     rc = bink2_enc_encode_intra(source, options, file, &q);
     if (fclose(file) != 0 && rc == BINK2_ENC_OK)
         rc = BINK2_ENC_ERR_ENCODE;
+    if (rc == BINK2_ENC_ERR_VERIFY) {
+        set_error(err, errlen, "encoder verification failed");
+        return BINK2_ENC_ERR_VERIFY;
+    }
+    if (rc == BINK2_ENC_ERR_INPUT) {
+        set_error(err, errlen, "failed to read a source frame");
+        return BINK2_ENC_ERR_INPUT;
+    }
     if (rc != BINK2_ENC_OK) {
         set_error(err, errlen, "encoder failed");
         return BINK2_ENC_ERR_ENCODE;

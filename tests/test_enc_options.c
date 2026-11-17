@@ -9,6 +9,7 @@ typedef struct {
     int width;
     int height;
     int moving;
+    int flash;
 } Ctx;
 
 static int read_yuv(void *user, unsigned long frame, unsigned char *y,
@@ -21,7 +22,7 @@ static int read_yuv(void *user, unsigned long frame, unsigned char *y,
 
     for (row = 0; row < ctx->height; row++)
         for (x = 0; x < ctx->width; x++) {
-            int value = (x + row + (int)frame) & 0xFF;
+            int value = (x + row + (int)frame * ctx->flash) & 0xFF;
 
             if (ctx->moving) {
                 int bx = ((int)frame * 2) % ctx->width;
@@ -132,6 +133,7 @@ int main(void)
 {
     static const unsigned slice_counts[4] = { 2, 3, 4, 8 };
     Ctx ctx;
+    static const int tiny[3][2] = { { 1, 1 }, { 1, 64 }, { 64, 1 } };
     char path[128];
     char recon[128];
     int s, four;
@@ -141,6 +143,7 @@ int main(void)
     ctx.width = 160;
     ctx.height = 120;
     ctx.moving = 1;
+    ctx.flash = 1;
     for (s = 0; s < 4; s++) {
         for (four = 0; four <= 1; four++) {
             snprintf(path, sizeof(path), "test_opt_%u_%d.bk2",
@@ -160,6 +163,7 @@ int main(void)
     ctx.width = 720;
     ctx.height = 460;
     ctx.moving = 0;
+    ctx.flash = 1;
     CHECK(encode_clip("test_opt_odd.bk2", "test_opt_odd.yuv", &ctx, 5, 4, 1,
                       150, 2) == BINK2_ENC_OK);
     CHECK(compare_file("test_opt_odd.bk2", "test_opt_odd.yuv", 720, 460, 5,
@@ -167,10 +171,37 @@ int main(void)
     remove("test_opt_odd.bk2");
     remove("test_opt_odd.yuv");
 
+    /* Odd width (not a multiple of 32) with the same exactness gate. */
+    ctx.width = 161;
+    ctx.height = 121;
+    ctx.flash = 1;
+    CHECK(encode_clip("test_opt_161.bk2", "test_opt_161.yuv", &ctx, 5, 4, 1,
+                      150, 2) == BINK2_ENC_OK);
+    CHECK(compare_file("test_opt_161.bk2", "test_opt_161.yuv", 161, 121, 5,
+                       1) == 0);
+    remove("test_opt_161.bk2");
+    remove("test_opt_161.yuv");
+
+    /* One-pixel dimensions: the chroma MC path must stay inside the planes. */
+    for (s = 0; s < 3; s++) {
+        ctx.width = tiny[s][0];
+        ctx.height = tiny[s][1];
+        ctx.moving = 0;
+        ctx.flash = 97;
+        snprintf(path, sizeof(path), "test_opt_tiny_%d.bk2", s);
+        snprintf(recon, sizeof(recon), "test_opt_tiny_%d.yuv", s);
+        CHECK(encode_clip(path, recon, &ctx, 3, 2, 1, 150, 2) ==
+              BINK2_ENC_OK);
+        CHECK(compare_file(path, recon, ctx.width, ctx.height, 3, 0) == 0);
+        remove(path);
+        remove(recon);
+    }
+
     /* Keyframe interval marks exactly 0, 10 and 20. */
     ctx.width = 160;
     ctx.height = 120;
     ctx.moving = 0;
+    ctx.flash = 1;
     CHECK(encode_clip("test_opt_keys.bk2", "test_opt_keys.yuv", &ctx, 21, 2,
                       0, 10, 2) == BINK2_ENC_OK);
     {

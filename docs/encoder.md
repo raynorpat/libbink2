@@ -32,7 +32,8 @@ slices 1..n-1.
 
 A frame is a sequence of 32x32 luma macroblocks. Intra frames write the
 quantiser delta, luma CBP/DC/AC, chroma V, then chroma U. Inter frames write
-the LRU block type (intra / skip / motion / residual), then:
+the LRU block type (skip / motion / residual; intra-in-inter is not emitted
+yet), then:
 
 - **skip** copies the macroblock from the reference and writes no MV;
 - **motion** writes one or four vectors and motion-compensates without a
@@ -98,7 +99,14 @@ reconstruction are independent of that post-filter.
 ## Validation
 
 `tools/validate.sh file.bk2` runs the pinned FFmpeg Bink 2 oracle with
-`-v error` and fails on any diagnostic. Set `FFMPEG_BINK2` to point at a
-different build. Set `BINK2ENC_BIN` and `BINK2_VALIDATE_YUV` (plus optional
+`-v error` and fails on any diagnostic. The pinned oracle has a
+`slice_height[4]` array bug in its 8-slice path, so it rejects valid 8-slice
+files; the script skips the oracle for those and the library's own decoder
+round trip covers them. Set `FFMPEG_BINK2` to point at a different build. Set
+`BINK2ENC_BIN` and `BINK2_VALIDATE_YUV` (plus optional
 `BINK2_VALIDATE_WIDTH/HEIGHT/FPS`) to also encode the same raw clip with the
 independent `bink2enc` and print both file sizes.
+
+`options.verify` decodes the just-written file with `libbink2` and compares
+every visible plane to the in-memory reconstruction, returning
+`BINK2_ENC_ERR_VERIFY` on a mismatch. `bink2_build --verify` uses it.
