@@ -12,6 +12,11 @@ option(BINK2_BUILD_SHARED "Build the shared libbink2 library" ON)
 option(BINK2_BUILD_ENCODER "Build the libbink2 encoder library" ON)
 option(BINK2_BUILD_TOOLS "Build the example programs" OFF)
 option(BINK2_BUILD_TESTS "Build the test programs" ON)
+option(BINK2_BUILD_PLAYER_OPENGL "Build the SDL + OpenGL player" ON)
+option(BINK2_BUILD_PLAYER_METAL "Build the SDL + Metal player" ON)
+option(BINK2_BUILD_PLAYER_VULKAN "Build the SDL + Vulkan player" ON)
+option(BINK2_BUILD_PLAYER_D3D9 "Build the Direct3D 9 player" ON)
+option(BINK2_BUILD_PLAYER_D3D11 "Build the Direct3D 11 player" ON)
 set(BINK2_SDL_VERSION "AUTO" CACHE STRING
   "SDL version for bink2_sdl_player: AUTO, 2 or 3")
 set_property(CACHE BINK2_SDL_VERSION PROPERTY STRINGS AUTO 2 3)
@@ -112,10 +117,93 @@ if(BINK2_BUILD_TOOLS)
       target_link_libraries(bink2_sdl_player PRIVATE
         ${BINK2_LINK_TARGET} ${BINK2_SDL_TARGET})
       install(TARGETS bink2_sdl_player RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+
+      set(BINK2_PLAYER_COMMON
+        src/tools/player/bink2_sdl_player_core.c
+        src/tools/player/bink2_playback.c
+        src/tools/player/bink2_playback_sdl.c
+        src/tools/player/bink2_mix.c
+        src/tools/player/bink2_motion.c)
+
+      function(bink2_add_sdl_player target)
+        add_executable(${target} ${ARGN} ${BINK2_PLAYER_COMMON})
+        bink2_set_compile_settings(${target})
+        if(BINK2_USE_SDL3)
+          target_compile_definitions(${target} PRIVATE BINK2_USE_SDL3=1)
+        elseif(TARGET SDL2::SDL2main)
+          target_link_libraries(${target} PRIVATE SDL2::SDL2main)
+        endif()
+        target_link_libraries(${target} PRIVATE
+          ${BINK2_LINK_TARGET} ${BINK2_SDL_TARGET})
+        install(TARGETS ${target} RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+      endfunction()
+
+      if(BINK2_BUILD_PLAYER_OPENGL)
+        bink2_add_sdl_player(bink2_sdlgl_player
+          src/tools/player/bink2_sdlgl_player.c
+          src/tools/player/bink2_gl_renderer.c)
+        if(APPLE)
+          target_compile_options(bink2_sdlgl_player PRIVATE
+            -Wno-deprecated-declarations)
+        endif()
+      endif()
+
+      if(APPLE AND BINK2_BUILD_PLAYER_METAL)
+        enable_language(OBJC)
+        bink2_add_sdl_player(bink2_sdlmetal_player
+          src/tools/player/bink2_sdlmetal_player.c
+          src/tools/player/bink2_metal_renderer.m)
+        target_link_libraries(bink2_sdlmetal_player PRIVATE
+          "-framework Metal" "-framework QuartzCore" "-framework Foundation")
+      endif()
+
+      if(BINK2_BUILD_PLAYER_VULKAN)
+        find_package(Vulkan QUIET)
+        find_path(BINK2_SHADERC_INCLUDE shaderc/shaderc.h)
+        find_library(BINK2_SHADERC_LIBRARY NAMES shaderc_shared
+          shaderc_combined shaderc)
+        if(Vulkan_FOUND AND BINK2_SHADERC_INCLUDE AND BINK2_SHADERC_LIBRARY)
+          bink2_add_sdl_player(bink2_sdlvulkan_player
+            src/tools/player/bink2_sdlvulkan_player.c
+            src/tools/player/bink2_vulkan_renderer.c)
+          target_include_directories(bink2_sdlvulkan_player PRIVATE
+            ${BINK2_SHADERC_INCLUDE})
+          target_link_libraries(bink2_sdlvulkan_player PRIVATE
+            Vulkan::Vulkan ${BINK2_SHADERC_LIBRARY})
+          if(BINK2_SHADERC_LIBRARY MATCHES "\\.a$" AND APPLE)
+            target_link_libraries(bink2_sdlvulkan_player PRIVATE c++)
+          endif()
+        else()
+          message(STATUS "Vulkan or shaderc not found; skipping bink2_sdlvulkan_player")
+        endif()
+      endif()
     else()
       message(STATUS "SDL2/SDL3 not found; skipping bink2_sdl_player")
     endif()
   endif()
+endif()
+
+if(WIN32 AND BINK2_BUILD_TOOLS)
+  set(BINK2_D3D_COMMON
+    src/tools/player/bink2_win32_player.c
+    src/tools/player/bink2_playback.c
+    src/tools/player/bink2_playback_win32.c
+    src/tools/player/bink2_mix.c
+    src/tools/player/bink2_motion.c)
+  foreach(api d3d9 d3d11)
+    string(TOUPPER "${api}" api_upper)
+    if(BINK2_BUILD_PLAYER_${api_upper})
+      add_executable(bink2_${api}_player ${BINK2_D3D_COMMON}
+        src/tools/player/bink2_${api}_renderer.c)
+      bink2_set_compile_settings(bink2_${api}_player)
+      target_compile_definitions(bink2_${api}_player PRIVATE
+        BINK2_${api_upper}=1)
+      target_link_libraries(bink2_${api}_player PRIVATE
+        ${BINK2_LINK_TARGET} ${api} dxguid d3dcompiler winmm)
+      install(TARGETS bink2_${api}_player RUNTIME DESTINATION
+        ${CMAKE_INSTALL_BINDIR})
+    endif()
+  endforeach()
 endif()
 
 if(BINK2_BUILD_ENCODER)

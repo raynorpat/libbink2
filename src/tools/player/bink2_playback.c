@@ -1,0 +1,218 @@
+#include "tools/player/bink2_playback.h"
+
+#include "tools/player/bink2_mix.h"
+
+#include <stdlib.h>
+#include <string.h>
+
+/* The device layer lives in bink2_playback_sdl.c or bink2_playback_win32.c;
+ * this file only mixes, queues and seeks. */
+
+static int16_t *mix_pcm = NULL;
+static unsigned long mix_cap = 0;
+/* Per-track resampling phase carried from one frame's packet to the next. */
+static double mix_phase[7];
+
+static void reset_phase(void)
+{
+    int i;
+
+    for (i = 0; i < 7; i++)
+        mix_phase[i] = 0.0;
+}
+
+/* Mix the current frame into mix_pcm. Returns the byte count. A NULL
+   total_bytes skips the test counter. */
+static unsigned long mix_current(bink2 object, const int enabled[7],
+                                 const unsigned char track_channels[7],
+                                 const unsigned long track_rates[7],
+                                 const Bink2Playback *audio,
+                                 unsigned long *total_bytes)
+{
+    Bink2MixTrack tracks[7];
+    int source[7];
+    unsigned long frames_out = 0;
+    unsigned long samples_out;
+    int count = 0;
+    int i;
+
+    for (i = 0; i < 7; i++) {
+        unsigned long size;
+        unsigned long samples = 0;
+        const unsigned char *pcm = NULL;
+
+        if (!enabled[i])
+            continue;
+        size = bink2_get_audio_size(object, (unsigned char)i);
+        if (total_bytes != NULL)
+            *total_bytes += size;
+        if (size > 0 && track_channels[i] > 0) {
+            samples = size / ((unsigned long)track_channels[i] * sizeof(int16_t));
+            pcm = bink2_get_audio(object, (unsigned char)i);
+            if (pcm == NULL)
+                samples = 0;
+        }
+        tracks[count].pcm = (const int16_t *)pcm;
+        tracks[count].samples = samples;
+        tracks[count].rate = track_rates[i];
+        tracks[count].channels = track_channels[i];
+        tracks[count].phase = mix_phase[i];
+        source[count] = i;
+        if (samples > 0 && track_rates[i] > 0 && audio->rate > 0) {
+            unsigned long converted =
+                bink2_mix_frames(&tracks[count], (unsigned long)audio->rate);
+
+            if (converted > frames_out)
+                frames_out = converted;
+        }
+        count++;
+    }
+    if (count == 0 || frames_out == 0 || audio->channels <= 0)
+        return 0;
+
+    samples_out = frames_out * (unsigned long)audio->channels;
+    if (samples_out > mix_cap) {
+        int16_t *grown = (int16_t *)realloc(
+            mix_pcm, (size_t)samples_out * sizeof(int16_t));
+
+        if (grown == NULL)
+            return 0;
+        mix_pcm = grown;
+        mix_cap = samples_out;
+    }
+    if (bink2_mix(tracks, count, (unsigned long)audio->rate, audio->channels,
+                 mix_pcm, frames_out) != 0)
+        return 0;
+    for (i = 0; i < count; i++) {
+        if (tracks[i].samples > 0)
+            mix_phase[source[i]] =
+                bink2_mix_next_phase(&tracks[i], (unsigned long)audio->rate);
+    }
+    return samples_out * sizeof(int16_t);
+}
+
+void bink2_playback_publish(bink2 object, const int enabled[7],
+                           const unsigned char track_channels[7],
+                           const unsigned long track_rates[7],
+                           Bink2Playback *audio, unsigned long *total_bytes)
+{
+    unsigned long bytes = mix_current(object, enabled, track_channels,
+                                      track_rates, audio, total_bytes);
+
+    if (bytes > 0)
+        bink2_playback_queue(audio, mix_pcm, bytes);
+}
+
+static int append_pcm(unsigned char **stream, unsigned long *length,
+                      unsigned long *cap, unsigned long bytes)
+{
+    unsigned char *grown;
+    unsigned long need;
+
+    if (bytes == 0)
+        return 0;
+    if (*length > (unsigned long)-1 - bytes)
+        return -1;
+    need = *length + bytes;
+    if (need > *cap) {
+        unsigned long next = *cap == 0 ? need : *cap;
+
+        while (next < need) {
+            if (next > (unsigned long)-1 / 2)
+                return -1;
+            next *= 2;
+        }
+        grown = (unsigned char *)realloc(*stream, (size_t)next);
+        if (grown == NULL)
+            return -1;
+        *stream = grown;
+        *cap = next;
+    }
+    memcpy(*stream + *length, mix_pcm, (size_t)bytes);
+    *length += bytes;
+    return 0;
+}
+
+int bink2_playback_seek(bink2 object, unsigned long target, char *status,
+                       Bink2Playback *audio, double usf, const int enabled[7],
+                       const unsigned char track_channels[7],
+                       const unsigned long track_rates[7])
+{
+    unsigned long cur = 0;
+    unsigned long frames = 0;
+    unsigned long origin = 0;
+    unsigned char *stream = NULL;
+    unsigned long length = 0;
+    unsigned long cap = 0;
+
+    bink2_playback_audio_clear(audio);
+    reset_phase();
+    if (bink2_seek_keyframe(object, target) != 0)
+        return -1;
+    if (bink2_info_all(object, &cur, &frames, NULL) != 0)
+        return -1;
+    origin = cur;
+
+    if (audio->ready) {
+        unsigned long bytes = mix_current(object, enabled, track_channels,
+                                          track_rates, audio, NULL);
+
+        if (append_pcm(&stream, &length, &cap, bytes) != 0) {
+            free(stream);
+            return -1;
+        }
+    }
+    while (cur < target) {
+        char next = bink2_next(object);
+
+        if (next != BINK2_MORE && next != BINK2_LAST) {
+            free(stream);
+            return -1;
+        }
+        if (bink2_info_all(object, &cur, &frames, NULL) != 0) {
+            free(stream);
+            return -1;
+        }
+        *status = next;
+        if (!audio->ready)
+            continue;
+        {
+            unsigned long bytes = mix_current(object, enabled, track_channels,
+                                              track_rates, audio, NULL);
+
+            if (append_pcm(&stream, &length, &cap, bytes) != 0) {
+                free(stream);
+                return -1;
+            }
+        }
+    }
+
+    if (audio->ready && length > 0) {
+        unsigned long offset = bink2_soundtrack_offset(
+            (unsigned long)audio->rate, audio->channels, usf, target);
+        unsigned long start = bink2_soundtrack_offset(
+            (unsigned long)audio->rate, audio->channels, usf, origin);
+
+        if (offset >= start)
+            offset -= start;
+        else
+            offset = 0;
+        if (offset < length)
+            bink2_playback_queue(audio, stream + offset, length - offset);
+    }
+    free(stream);
+
+    if (frames > 0 && cur + 1 >= frames)
+        *status = BINK2_LAST;
+    else
+        *status = BINK2_MORE;
+    return 0;
+}
+
+void bink2_playback_shutdown(void)
+{
+    free(mix_pcm);
+    mix_pcm = NULL;
+    mix_cap = 0;
+    reset_phase();
+}

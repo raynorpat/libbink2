@@ -114,12 +114,17 @@ int main(int argc, char **argv)
     if (tracks > 0 && rates[0] != 0)
         rate = rates[0];
 
-    if (SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO) != 0) {
+#if BINK2_USE_SDL3
+    if (!SDL_Init(SDL_INIT_VIDEO)) {
+#else
+    if (SDL_Init(SDL_INIT_VIDEO) != 0) {
+#endif
         fprintf(stderr, "bink2_sdl_player: SDL init failed: %s\n",
                 SDL_GetError());
         bink2_close(b);
         return 77;
     }
+    (void)SDL_InitSubSystem(SDL_INIT_AUDIO);
 #if BINK2_USE_SDL3
     if (!SDL_CreateWindowAndRenderer(path, (int)width, (int)height, 0,
                                      &window, &renderer)) {

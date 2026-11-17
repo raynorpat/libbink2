@@ -57,12 +57,21 @@ if(TARGET bink2_dump)
   set_tests_properties(dump PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
-if(TARGET bink2_sdl_player)
-  add_test(NAME sdl COMMAND ${CMAKE_COMMAND}
-    -DPLAYER_EXE=$<TARGET_FILE:bink2_sdl_player>
-    -P ${CMAKE_CURRENT_SOURCE_DIR}/run_sdl.cmake)
-  set_tests_properties(sdl PROPERTIES SKIP_RETURN_CODE 77)
-endif()
+add_executable(test_player_motion test_player_motion.c
+  ${CMAKE_SOURCE_DIR}/src/tools/player/bink2_motion.c)
+target_include_directories(test_player_motion PRIVATE
+  ${CMAKE_SOURCE_DIR}/src/tools/player)
+target_link_libraries(test_player_motion PRIVATE ${BINK2_LINK_TARGET})
+add_test(NAME player_motion COMMAND test_player_motion)
+
+add_executable(test_player_launcher test_player_launcher.c)
+foreach(player sdl sdlgl sdlmetal sdlvulkan d3d9 d3d11)
+  if(TARGET bink2_${player}_player)
+    add_test(NAME ${player} COMMAND test_player_launcher
+      $<TARGET_FILE:bink2_${player}_player>)
+    set_tests_properties(${player} PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
+  endif()
+endforeach()
 
 if(TARGET bink2_encoder)
   add_executable(test_enc_bits test_enc_bits.c)

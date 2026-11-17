@@ -31,10 +31,11 @@ cmake --build build-asan
 ctest --test-dir build-asan --output-on-failure
 ```
 
-A clean run is 23 tests with `BINK2_BUILD_TOOLS=ON`. Without
-`BINK2_TEST_MEDIA`, `decode_f`, `decode_g`, and `audio` report `Skipped`
-(exit code 77) and `dump` and `sdl` pass without decoding anything. A skip is
-not a pass: say so when reporting results for decoder changes.
+A clean run is 27 tests with `BINK2_BUILD_TOOLS=ON` on macOS (the GL, Metal,
+and Vulkan player smoke tests skip when `SDL_VIDEODRIVER=dummy` cannot create a
+context; Windows adds the D3D9/D3D11 tests). Without `BINK2_TEST_MEDIA`, the
+reference tests and player tests report `Skipped` (exit code 77). A skip is
+not a pass: say so when reporting results.
 
 The sample files are `sc13_01_partial.bk2` and `ge_video_86l.bk2`. They are
 not in the repository and cannot be redistributed. If you do not have them,

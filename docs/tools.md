@@ -1,6 +1,7 @@
 # Command-line tools
 
-Three programs are built when `BINK2_BUILD_TOOLS` is `ON`:
+The command-line tools and players are built when `BINK2_BUILD_TOOLS` is
+`ON`. Players are added when their platform dependencies are present:
 
 ```sh
 cmake -S . -B build -DBINK2_BUILD_TOOLS=ON
@@ -11,10 +12,20 @@ cmake --build build
 | --- | --- | --- |
 | `bink2_build` | Encode images to a `.bk2` file | `BINK2_BUILD_ENCODER=ON` (the default) |
 | `bink2_dump` | Decode a `.bk2` file to PPM frames and print plane checksums | nothing extra |
-| `bink2_sdl_player` | Play a `.bk2` file with audio | an SDL3 or SDL2 CMake package |
+| `bink2_sdl_player` | Play with the SDL renderer, with audio | SDL3 or SDL2 |
+| `bink2_sdlgl_player` | Play with SDL + OpenGL 3.2 | SDL3 or SDL2 |
+| `bink2_sdlmetal_player` | Play with SDL + Metal | macOS, SDL3 or SDL2 |
+| `bink2_sdlvulkan_player` | Play with SDL + Vulkan | SDL, Vulkan loader, shaderc; MoltenVK on macOS |
+| `bink2_d3d9_player` | Play with Direct3D 9 | Windows |
+| `bink2_d3d11_player` | Play with Direct3D 11 | Windows |
 
-If SDL is not found, the player is skipped with a status message and the
-other tools still build.
+If a dependency is not found, that player is skipped with a status message and
+the other tools still build. The Direct3D players use a raw Win32 window and
+waveOut audio; they do not need SDL.
+
+The renderer and player layer is adapted from
+[libbink](https://github.com/raynorpat/libbink) and remains
+LGPL-2.1-or-later.
 
 ## bink2_build
 
@@ -113,8 +124,45 @@ a skip).
 `sdl` test uses it together with `SDL_VIDEODRIVER=dummy` and
 `SDL_AUDIODRIVER=dummy` to run headless.
 
-Force a backend at configure time with `-DBINK2_SDL_VERSION=2` or `3`; the
-default `AUTO` prefers SDL3.
+Force the SDL version at configure time with `-DBINK2_SDL_VERSION=2` or `3`;
+the default `AUTO` prefers SDL3.
+
+The renderer players share the same controls and test hooks:
+
+| Key | Action |
+| --- | --- |
+| Space | Pause or resume |
+| Left / Right | Seek one second |
+| M | Toggle motion-compensated interpolation |
+| Esc, Q | Quit |
+
+Environment hooks: `BINK2_PLAYER_TEST_FRAMES=N` exits after N frames,
+`BINK2_PLAYER_TEST_SEEK=N` seeks before playing, `BINK2_PLAYER_T=0..1` sets the
+interpolation time, `BINK2_PLAYER_SHADER=present|interp` picks the initial
+shader, and `BINK2_PLAYER_DUMP=frame.ppm` renders one frame for readback and
+writes it as a PPM. The Direct3D player uses `BINK2_D3D_TEST_FRAMES` and
+`BINK2_D3D_SHADER`.
+
+The players decode YUV planes and convert them with the same full-range
+BT.601 matrix as `bink2_get_video`. The renderers sample the per-8×8 luma
+motion field derived from the decoder's per-32×32 macroblock vectors; half-pel
+vectors are rounded to whole pixels for interpolation.
+
+Backend build options (all default `ON` where the platform applies):
+
+```
+-DBINK2_BUILD_PLAYER_OPENGL=ON
+-DBINK2_BUILD_PLAYER_METAL=ON
+-DBINK2_BUILD_PLAYER_VULKAN=ON
+-DBINK2_BUILD_PLAYER_D3D9=ON
+-DBINK2_BUILD_PLAYER_D3D11=ON
+```
+
+Player smoke tests run with `SDL_VIDEODRIVER=dummy` and return `77` when the
+backend cannot create a context, so CTest reports them as skipped rather than
+failed. OpenGL, Metal, and Vulkan need a real window; a normal desktop run
+with `BINK2_TEST_MEDIA` set is the manual check. Direct3D tests run only on
+Windows.
 
 ## tools/validate.sh
 
