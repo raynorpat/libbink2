@@ -32,7 +32,13 @@ set_tests_properties(decode_g PROPERTIES SKIP_RETURN_CODE 77)
 
 add_executable(test_malformed test_malformed.c)
 target_link_libraries(test_malformed PRIVATE ${BINK2_LINK_TARGET})
+target_compile_definitions(test_malformed PRIVATE
+  BINK2_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/media")
 add_test(NAME malformed COMMAND test_malformed)
+
+add_executable(test_audio_unit test_audio_unit.c)
+target_link_libraries(test_audio_unit PRIVATE ${BINK2_LINK_TARGET})
+add_test(NAME audio_unit COMMAND test_audio_unit)
 
 add_executable(test_audio test_audio.c)
 target_link_libraries(test_audio PRIVATE ${BINK2_LINK_TARGET})

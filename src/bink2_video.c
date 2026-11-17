@@ -243,7 +243,7 @@ void bink2_video_reset(Bink2Video *v)
 }
 
 int bink2_video_slice_heights(int version, unsigned long flags,
-                              unsigned long height, int heights[4])
+                              unsigned long height, int heights[8])
 {
     unsigned long aligned_h = (height + 31) & ~31UL;
 
@@ -278,17 +278,14 @@ int bink2_video_slice_heights(int version, unsigned long flags,
     }
 }
 
-int bink2_video_decode(Bink2Video *v, const unsigned char *data, size_t size,
-                       int is_keyframe)
+static int decode_impl(Bink2Video *v, const unsigned char *data,
+                       size_t real_size, size_t padded_size, int is_keyframe)
 {
     Bink2Bits bits;
     unsigned long frame_flags;
     int num_slices;
-    int slice_height[4] = { 0, 0, 0, 0 };
+    int slice_height[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
     int i;
-
-    if (v == NULL || data == NULL || size < 8)
-        return BINK2_ERROR;
 
     frame_flags = le32(data);
     v->frame_flags = frame_flags;
@@ -299,11 +296,13 @@ int bink2_video_decode(Bink2Video *v, const unsigned char *data, size_t size,
     memset(v->old_mv_cur, 0,
            ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
 
-    bink2_bits_init(&bits, data, size);
+    bink2_bits_init(&bits, data, padded_size);
     bink2_bits_skip(&bits, 32);
 
     num_slices = bink2_video_slice_heights(v->version, v->flags, v->height,
                                           slice_height);
+    if (real_size < (size_t)4 * (size_t)num_slices)
+        return BINK2_ERROR;
 
     bink2_bits_skip(&bits, 32 * (num_slices - 1));
     if (frame_flags & 0x10000) {
@@ -330,7 +329,10 @@ int bink2_video_decode(Bink2Video *v, const unsigned char *data, size_t size,
 
             bink2_bits_align32(&bits);
             target = le32(data + 4 + 4UL * (unsigned long)(i - 1)) * 8UL;
-            if (target < bits.bitpos)
+            if (target < bits.bitpos ||
+                target > (unsigned long)real_size * 8UL)
+                return BINK2_ERROR;
+            if (target - bits.bitpos > 0x7FFFFFFFUL)
                 return BINK2_ERROR;
             bink2_bits_skip(&bits, (int)(target - bits.bitpos));
         }
@@ -345,6 +347,11 @@ int bink2_video_decode(Bink2Video *v, const unsigned char *data, size_t size,
         }
     }
 
+    /* A valid frame may rely on a few implicit zero bits after the last
+     * byte. More than 64 means the packet was truncated. */
+    if (bits.bitpos > real_size * 8UL + 64UL)
+        return BINK2_ERROR;
+
     for (i = 0; i < 4; i++) {
         unsigned long h = (i == 1 || i == 2) ? v->aligned_h / 2
                                              : v->aligned_h;
@@ -354,6 +361,38 @@ int bink2_video_decode(Bink2Video *v, const unsigned char *data, size_t size,
     }
     v->has_prev = 1;
     return 0;
+}
+
+int bink2_video_decode(Bink2Video *v, const unsigned char *data, size_t size,
+                       int is_keyframe)
+{
+    unsigned char *padded;
+    int ret;
+
+    if (v == NULL || data == NULL || size < 8)
+        return BINK2_ERROR;
+    padded = (unsigned char *)malloc(size + 8);
+    if (padded == NULL)
+        return BINK2_ERROR;
+    memcpy(padded, data, size);
+    memset(padded + size, 0, 8);
+    ret = decode_impl(v, padded, size, size + 8, is_keyframe);
+    free(padded);
+    if (ret != 0 && v->has_prev) {
+        /* Do not publish a half-decoded frame after an error: restore the
+         * previous picture so bink2_get_plane keeps returning it. */
+        int i;
+
+        for (i = 0; i < 4; i++) {
+            unsigned long h = (i == 1 || i == 2) ? v->aligned_h / 2
+                                                 : v->aligned_h;
+
+            if (v->cur[i] != NULL && v->ref[i] != NULL)
+                memcpy(v->cur[i], v->ref[i], (size_t)v->stride[i] * h);
+        }
+        v->rgb_valid = 0;
+    }
+    return ret;
 }
 
 const unsigned char *bink2_video_plane(Bink2Video *v, int plane)

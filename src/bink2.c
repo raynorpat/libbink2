@@ -41,7 +41,7 @@ static int read_u32(const bink2 b, unsigned long off, unsigned long *value)
     return 0;
 }
 
-static int parse_container(bink2 b)
+static int parse_container(bink2 b, int report_alpha)
 {
     unsigned char hdr[BINK2_HEADER_SIZE];
     unsigned long declared;
@@ -70,6 +70,13 @@ static int parse_container(bink2 b)
     b->fps_num = le32(hdr + 28);
     b->fps_den = le32(hdr + 32);
     b->flags = le32(hdr + 36);
+    /* The KB2g+ alpha syntax is not ported yet; reject the stream instead
+     * of decoding it with the alpha plane half-written. */
+    if ((b->flags & BINK2_FLAG_ALPHA) && b->version > 'f') {
+        if (report_alpha)
+            fputs("libbink2: KB2g+ alpha streams are not supported\n", stderr);
+        return -1;
+    }
 
     if (declared < BINK2_HEADER_SIZE)
         return -1;
@@ -187,14 +194,14 @@ bink2 bink2_open_memory(const unsigned char *buffer, unsigned long size)
     object->mem_size = size;
     object->actual_size = size;
     object->mode = BINK2_MODE_MEMORY;
-    if (parse_container(object) != 0) {
+    if (parse_container(object, 0) != 0) {
         bink2_close(object);
         return NULL;
     }
     return object;
 }
 
-bink2 bink2_open_filepointer(FILE *file, unsigned char mode)
+static bink2 open_stream(FILE *file, unsigned char mode, int report_alpha)
 {
     bink2 object;
     long end;
@@ -217,11 +224,16 @@ bink2 bink2_open_filepointer(FILE *file, unsigned char mode)
     object->mode = BINK2_MODE_DISK;
     object->owns_file = 0;
     object->actual_size = (unsigned long)end;
-    if (parse_container(object) != 0) {
+    if (parse_container(object, report_alpha) != 0) {
         bink2_close(object);
         return NULL;
     }
     return object;
+}
+
+bink2 bink2_open_filepointer(FILE *file, unsigned char mode)
+{
+    return open_stream(file, mode, 0);
 }
 
 bink2 bink2_open_file(const char *filename, unsigned char mode)
@@ -234,7 +246,7 @@ bink2 bink2_open_file(const char *filename, unsigned char mode)
     file = fopen(filename, "rb");
     if (file == NULL)
         return NULL;
-    object = bink2_open_filepointer(file, mode);
+    object = open_stream(file, mode, 1);
     if (object == NULL) {
         fclose(file);
         return NULL;
@@ -488,11 +500,25 @@ char bink2_next(bink2 object)
 char bink2_seek_keyframe(bink2 object, unsigned long frame)
 {
     unsigned long target;
+    unsigned long max_frame;
 
     if (object == NULL || object->frame_count == 0)
         return BINK2_ERROR;
-    if (frame >= object->frame_count)
-        frame = object->frame_count - 1;
+    max_frame = object->frame_count;
+    while (max_frame > 0) {
+        unsigned long idx = max_frame - 1;
+        unsigned long off = object->frame_offsets[idx];
+        unsigned long sz = object->frame_sizes[idx];
+
+        if (off < object->actual_size &&
+            sz <= object->actual_size - off)
+            break;
+        max_frame--;
+    }
+    if (max_frame == 0)
+        return BINK2_ERROR;
+    if (frame >= max_frame)
+        frame = max_frame - 1;
     target = frame;
     while (target > 0 && !object->frame_keyframes[target])
         target--;

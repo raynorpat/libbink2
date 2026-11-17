@@ -58,7 +58,12 @@ extern "C" {
 #endif
 
 /* OPEN OPERATIONS */
-/** open a Bink 2 file from disk */
+/**
+ * Open a Bink 2 file from disk. `mode` is accepted for libbink API
+ * compatibility; disk files are read on demand and `BINK2_MODE_MEMORY` is
+ * currently equivalent to `BINK2_MODE_DISK`. Use bink2_open_memory() to
+ * decode from a buffer.
+ */
 bink2 bink2_open_file(const char *filename, unsigned char mode);
 /** open a Bink 2 file from an existing stream */
 bink2 bink2_open_filepointer(FILE *file, unsigned char mode);

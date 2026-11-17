@@ -141,20 +141,23 @@ static int old_delta_q(Bink2Bits *bits)
     return dq;
 }
 
-static unsigned old_cbp_luma(Bink2Bits *bits, unsigned prev_cbp)
+static int old_cbp_luma(Bink2Bits *bits, unsigned prev_cbp,
+                        unsigned *out)
 {
     unsigned cbp, cbp4, cbplo, cbphi;
     int b, i, j;
 
     b = bink2_bits_read1(bits);
     if (b < 0)
-        return 0;
+        return -1;
     if (b) {
         b = bink2_bits_read1(bits);
         if (b < 0)
+            return -1;
+        if (b) {
+            *out = prev_cbp;
             return 0;
-        if (b)
-            return prev_cbp;
+        }
         cbplo = prev_cbp & 0xFFFF;
     } else {
         cbplo = 0;
@@ -162,12 +165,12 @@ static unsigned old_cbp_luma(Bink2Bits *bits, unsigned prev_cbp)
         for (i = 0; i < 4; i++) {
             b = bink2_bits_read1(bits);
             if (b < 0)
-                return 0;
+                return -1;
             if (!b) {
                 int v = bink2_bits_read(bits, 4);
 
                 if (v < 0)
-                    return 0;
+                    return -1;
                 cbp4 = (unsigned)v;
             }
             cbplo |= cbp4 << (i * 4);
@@ -184,7 +187,7 @@ static unsigned old_cbp_luma(Bink2Bits *bits, unsigned prev_cbp)
                     if (j & cbp) {
                         b = bink2_bits_read1(bits);
                         if (b < 0)
-                            return 0;
+                            return -1;
                         if (b)
                             cbp4 |= (unsigned)j;
                     }
@@ -192,7 +195,7 @@ static unsigned old_cbp_luma(Bink2Bits *bits, unsigned prev_cbp)
             } else {
                 b = bink2_bits_read1(bits);
                 if (b < 0)
-                    return 0;
+                    return -1;
                 if (!b) {
                     cbp4 = 0;
                     for (j = 1; j < 16; j <<= 1) {
@@ -200,7 +203,7 @@ static unsigned old_cbp_luma(Bink2Bits *bits, unsigned prev_cbp)
                             int bit = bink2_bits_read1(bits);
 
                             if (bit < 0)
-                                return 0;
+                                return -1;
                             if (bit)
                                 cbp4 |= (unsigned)j;
                         }
@@ -214,29 +217,33 @@ static unsigned old_cbp_luma(Bink2Bits *bits, unsigned prev_cbp)
         cbphi = (cbphi >> 4) | (cbp4 << 0x1c);
         cbp >>= 4;
     }
-    return cbphi | cbplo;
+    *out = cbphi | cbplo;
+    return 0;
 }
 
-static unsigned old_cbp_chroma(Bink2Bits *bits, unsigned prev_cbp)
+static int old_cbp_chroma(Bink2Bits *bits, unsigned prev_cbp,
+                          unsigned *out)
 {
     unsigned cbplo, cbphi;
     int b, i;
 
     b = bink2_bits_read1(bits);
     if (b < 0)
-        return 0;
+        return -1;
     if (b) {
         b = bink2_bits_read1(bits);
         if (b < 0)
+            return -1;
+        if (b) {
+            *out = prev_cbp;
             return 0;
-        if (b)
-            return prev_cbp;
+        }
         cbplo = prev_cbp & 0xF;
     } else {
         int v = bink2_bits_read(bits, 4);
 
         if (v < 0)
-            return 0;
+            return -1;
         cbplo = (unsigned)v;
     }
     cbphi = 0;
@@ -245,22 +252,25 @@ static unsigned old_cbp_chroma(Bink2Bits *bits, unsigned prev_cbp)
             cbphi = (prev_cbp >> 16) & cbplo;
             b = bink2_bits_read1(bits);
             if (b < 0)
+                return -1;
+            if (b) {
+                *out = cbplo | (cbphi << 16);
                 return 0;
-            if (b)
-                return cbplo | (cbphi << 16);
+            }
         }
         cbphi = 0;
         for (i = 1; i < 16; i <<= 1) {
             if (i & cbplo) {
                 b = bink2_bits_read1(bits);
                 if (b < 0)
-                    return 0;
+                    return -1;
                 if (b)
                     cbphi |= (unsigned)i;
             }
         }
     }
-    return cbplo | (cbphi << 16);
+    *out = cbplo | (cbphi << 16);
+    return 0;
 }
 
 static float clipf(float value, float min, float max)
@@ -564,7 +574,8 @@ static int old_decode_intra_luma(Bink2Video *v, Bink2Bits *bits,
     unsigned cbp;
     int q, dq, i, j;
 
-    cbp = old_cbp_luma(bits, *prev_cbp);
+    if (old_cbp_luma(bits, *prev_cbp, &cbp) != 0)
+        return -1;
     *prev_cbp = cbp;
     dq = old_delta_q(bits);
     q = *prev_q + dq;
@@ -600,7 +611,8 @@ static int old_decode_intra_chroma(Bink2Video *v, Bink2Bits *bits,
     unsigned cbp;
     int q, dq, i;
 
-    cbp = old_cbp_chroma(bits, *prev_cbp);
+    if (old_cbp_chroma(bits, *prev_cbp, &cbp) != 0)
+        return -1;
     *prev_cbp = cbp;
     dq = old_delta_q(bits);
     q = *prev_q + dq;
@@ -838,7 +850,8 @@ static int old_decode_inter_luma(Bink2Video *v, Bink2Bits *bits,
     int q, dq, i, j;
 
     (void)flags;
-    cbp = old_cbp_luma(bits, *prev_cbp);
+    if (old_cbp_luma(bits, *prev_cbp, &cbp) != 0)
+        return -1;
     *prev_cbp = cbp;
     dq = old_delta_q(bits);
     q = *prev_q + dq;
@@ -874,7 +887,8 @@ static int old_decode_inter_chroma(Bink2Video *v, Bink2Bits *bits,
     unsigned cbp;
     int q, dq, i;
 
-    cbp = old_cbp_chroma(bits, *prev_cbp);
+    if (old_cbp_chroma(bits, *prev_cbp, &cbp) != 0)
+        return -1;
     *prev_cbp = cbp;
     dq = old_delta_q(bits);
     q = *prev_q + dq;
@@ -918,6 +932,15 @@ void bink2_video_copy_mb(Bink2Video *v, int x, int y)
     }
 }
 
+static int16_t clamp_motion(int32_t value)
+{
+    if (value < -32768)
+        return -32768;
+    if (value > 32767)
+        return 32767;
+    return (int16_t)value;
+}
+
 void bink2_video_store_motion(Bink2Video *v, int x, int y, int nb)
 {
     size_t mb = (size_t)(y / 32) * v->mb_w + x / 32;
@@ -925,8 +948,8 @@ void bink2_video_store_motion(Bink2Video *v, int x, int y, int nb)
     int k;
 
     for (k = 0; k < 4; k++) {
-        v->mv[0][mb * 4 + k] = (int16_t)mv[k * 2];
-        v->mv[1][mb * 4 + k] = (int16_t)mv[k * 2 + 1];
+        v->mv[0][mb * 4 + k] = clamp_motion(mv[k * 2]);
+        v->mv[1][mb * 4 + k] = clamp_motion(mv[k * 2 + 1]);
     }
     v->mv_count[mb] = (unsigned char)nb;
 }

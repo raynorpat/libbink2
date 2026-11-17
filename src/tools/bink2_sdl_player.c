@@ -208,23 +208,6 @@ int main(int argc, char **argv)
 #endif
         SDL_RenderPresent(renderer);
 
-        if (tracks > 0) {
-            unsigned long mixed = bink2_mix_frame(b, mix, MIX_FRAMES,
-                                                  (unsigned char)tracks);
-
-            if (mixed > 0) {
-#if BINK2_USE_SDL3
-                if (stream != NULL)
-                    SDL_PutAudioStreamData(stream, mix,
-                                           (int)(mixed * 2 * sizeof(short)));
-#else
-                if (device != 0)
-                    SDL_QueueAudio(device, mix,
-                                   (Uint32)(mixed * 2 * sizeof(short)));
-#endif
-            }
-        }
-
         if (poll_events(&paused, &seek_delta))
             break;
         if (seek_delta != 0) {
@@ -243,6 +226,23 @@ int main(int argc, char **argv)
         if (paused) {
             SDL_Delay(16);
             continue;
+        }
+
+        if (tracks > 0) {
+            unsigned long mixed = bink2_mix_frame(b, mix, MIX_FRAMES,
+                                                  (unsigned char)tracks);
+
+            if (mixed > 0) {
+#if BINK2_USE_SDL3
+                if (stream != NULL)
+                    SDL_PutAudioStreamData(stream, mix,
+                                           (int)(mixed * 2 * sizeof(short)));
+#else
+                if (device != 0)
+                    SDL_QueueAudio(device, mix,
+                                   (Uint32)(mixed * 2 * sizeof(short)));
+#endif
+            }
         }
 
         decoded++;

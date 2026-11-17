@@ -15,7 +15,8 @@ depend on `libbink`.
 
 ## Goals
 
-- Decode `KB2f` through `KB2n` video: YUV 4:2:0 plus optional alpha,
+- Decode `KB2f` through `KB2n` video: YUV 4:2:0; alpha for `KB2f` (`KB2g`+
+  alpha is rejected at open until that syntax is ported),
   32x32 macroblocks, intra/skip/motion/motion+residual blocks, 1 or 4 motion
   vectors per macroblock, 2/3/4/8 slices.
 - Decode Bink Audio 2 (DCT and RDFT tracks), up to 7 tracks, and publish
@@ -272,7 +273,7 @@ precedence and skips the conversion.
 
 ## Decoder behavior and known divergence
 
-- Video output is decoded YUV 4:2:0 planes with decoder strides, plus alpha when
+- Video output is decoded YUV 4:2:0 planes with decoder strides, plus `KB2f` alpha when
   the container flag is set. `bink2_get_video` lazily converts to packed RGB24.
 - Audio is decoded to host-endian signed 16-bit PCM, mixed across enabled tracks
   by the player.
@@ -319,11 +320,13 @@ precedence and skips the conversion.
   | `KB2f`, 2 slices, DCT audio | golden-gated (partial sample) |
   | `KB2g`, 2 slices, stereo DCT audio | golden-gated |
   | `KB2j`, 4 slices, synthetic fixture | golden-gated (32 frames, bink2enc) |
-  | `KB2h`/`KB2k`–`KB2n`, 3/8 slices, alpha, RDFT | best-effort; unit and decode-smoke tests only until media exists |
+  | `KB2h`/`KB2k`–`KB2n`, 3/8 slices, RDFT | best-effort; unit and decode-smoke tests only until media exists |
+  | alpha | `KB2f` compiled but unverified (no media); `KB2g`+ rejected at open |
 
-  The h–n, alpha, and RDFT code is still implemented from the reference and
-  exercised by synthetic/unit tests, but the design does not claim bit-exact
-  verification for those paths. No further `.bk2` media is available as of
+  The h–n and RDFT code is still implemented from the reference and exercised
+  by synthetic/unit tests, but the design does not claim bit-exact
+  verification for those paths. `KB2g`+ alpha is deliberately rejected
+  because the residual, motion, and intra-DC alpha syntax is not ported. No further `.bk2` media is available as of
   this design. Adding a sample moves a row into the golden-gated set without a
   design change.
 - **Optional cross-check:** decode the same files with NihAV and compare plane

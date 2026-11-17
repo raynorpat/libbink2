@@ -45,6 +45,34 @@ static int test_slice_layout(void)
     return 0;
 }
 
+static int test_fixture(void)
+{
+    bink2 b;
+    int status;
+    unsigned long w = 0, h = 0;
+    unsigned long frame;
+
+    b = bink2_open_file(BINK2_FIXTURE_DIR "/synthetic_kb2j.bk2",
+                        BINK2_MODE_DISK);
+    CHECK(b != NULL);
+    CHECK(bink2_info_video(b, &w, &h, NULL) == 0);
+    CHECK(bink2_enable_video(b, 1) == 0);
+    for (frame = 0; frame < 32; frame++) {
+        status = frame == 0 ? bink2_first(b) : bink2_next(b);
+        CHECK(status != BINK2_ERROR);
+        CHECK(plane_hash(b, 0, (int)w, (int)h) ==
+              bink2_kb2j_checksums[frame].y);
+        CHECK(plane_hash(b, 1, (int)((w + 1) / 2),
+                         (int)((h + 1) / 2)) ==
+              bink2_kb2j_checksums[frame].u);
+        CHECK(plane_hash(b, 2, (int)((w + 1) / 2),
+                         (int)((h + 1) / 2)) ==
+              bink2_kb2j_checksums[frame].v);
+    }
+    bink2_close(b);
+    return 0;
+}
+
 int main(void)
 {
     bink2 b;
@@ -53,6 +81,9 @@ int main(void)
     unsigned long w = 0, h = 0;
 
     CHECK(test_slice_layout() == 0);
+    /* The KB2j fixture ships with the repo, so exercise it even when no
+     * external media directory is configured. */
+    CHECK(test_fixture() == 0);
 
     skip = open_sample("ge_video_86l.bk2", &b);
     if (skip)
@@ -89,29 +120,6 @@ int main(void)
         CHECK(bink2_next(b) == BINK2_LAST);
     }
 
-    bink2_close(b);
-
-    b = bink2_open_file(BINK2_FIXTURE_DIR "/synthetic_kb2j.bk2",
-                        BINK2_MODE_DISK);
-    CHECK(b != NULL);
-    CHECK(bink2_info_video(b, &w, &h, NULL) == 0);
-    CHECK(bink2_enable_video(b, 1) == 0);
-    {
-        unsigned long frame;
-
-        for (frame = 0; frame < 32; frame++) {
-            status = frame == 0 ? bink2_first(b) : bink2_next(b);
-            CHECK(status != BINK2_ERROR);
-            CHECK(plane_hash(b, 0, (int)w, (int)h) ==
-                  bink2_kb2j_checksums[frame].y);
-            CHECK(plane_hash(b, 1, (int)((w + 1) / 2),
-                             (int)((h + 1) / 2)) ==
-                  bink2_kb2j_checksums[frame].u);
-            CHECK(plane_hash(b, 2, (int)((w + 1) / 2),
-                             (int)((h + 1) / 2)) ==
-                  bink2_kb2j_checksums[frame].v);
-        }
-    }
     bink2_close(b);
     return 0;
 }

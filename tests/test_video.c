@@ -120,11 +120,69 @@ static int test_mc_identity(void)
     return 0;
 }
 
+static int test_mc_edge(void)
+{
+    Bink2Video v;
+    unsigned char luma[736 * 480];
+    unsigned char chroma[368 * 240];
+    unsigned char dst[32 * 32];
+    static const int motions[8][2] = {
+        { -2000, -2000 }, { 2000, 2000 }, { -2000, 2000 }, { 2000, -2000 },
+        { 1, 0 }, { 0, 1 }, { 3, 3 }, { -3, 1 }
+    };
+    int i;
+
+    CHECK(bink2_video_init(&v, 720, 460, 0, 'g') == 0);
+    memset(luma, 77, sizeof(luma));
+    memset(chroma, 55, sizeof(chroma));
+    for (i = 0; i < 8; i++) {
+        memset(dst, 0, sizeof(dst));
+        bink2_mc_luma(dst, 32, luma, 736, 0, 0, 720, 460,
+                      motions[i][0], motions[i][1]);
+        {
+            int row, col;
+            for (row = 0; row < 16; row++)
+                for (col = 0; col < 16; col++)
+                    CHECK(dst[row * 32 + col] == 77);
+        }
+        memset(dst, 0, sizeof(dst));
+        bink2_mc_luma(dst, 32, luma, 736, 688, 432, 720, 460,
+                      motions[i][0], motions[i][1]);
+        {
+            int row, col;
+            for (row = 0; row < 16; row++)
+                for (col = 0; col < 16; col++)
+                    CHECK(dst[row * 32 + col] == 77);
+        }
+        memset(dst, 0, sizeof(dst));
+        bink2_mc_chroma(dst, 16, chroma, 368, 0, 0, 360, 230,
+                        motions[i][0], motions[i][1]);
+        {
+            int row, col;
+            for (row = 0; row < 8; row++)
+                for (col = 0; col < 8; col++)
+                    CHECK(dst[row * 16 + col] == 55);
+        }
+        memset(dst, 0, sizeof(dst));
+        bink2_mc_chroma(dst, 16, chroma, 368, 344, 216, 360, 230,
+                        motions[i][0], motions[i][1]);
+        {
+            int row, col;
+            for (row = 0; row < 8; row++)
+                for (col = 0; col < 8; col++)
+                    CHECK(dst[row * 16 + col] == 55);
+        }
+    }
+    bink2_video_uninit(&v);
+    return 0;
+}
+
 int main(void)
 {
     CHECK(test_geometry() == 0);
     CHECK(test_rgb() == 0);
     CHECK(test_idct_zero() == 0);
     CHECK(test_mc_identity() == 0);
+    CHECK(test_mc_edge() == 0);
     return 0;
 }

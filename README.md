@@ -7,7 +7,9 @@
 
 The decoder and tools are implemented:
 
-- `KB2f` through `KB2n` video, YUV 4:2:0 with optional alpha.
+- `KB2f` through `KB2n` video, YUV 4:2:0.
+- Alpha for `KB2f`. `KB2g`+ alpha streams are rejected at open until that
+  syntax is ported; decoding them half-written would corrupt every plane.
 - Bink Audio 2, up to seven tracks.
 - Keyframe seeking and a 2 GB file ceiling.
 - `bink2_dump`, `bink2_build` (on the encoder plan), and an SDL player.

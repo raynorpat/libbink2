@@ -357,8 +357,8 @@ static int new_decode_dq(Bink2Bits *bits)
     return dq;
 }
 
-static unsigned new_cbp_luma(Bink2Video *v, Bink2Bits *bits,
-                             unsigned prev_cbp)
+static int new_cbp_luma(Bink2Video *v, Bink2Bits *bits,
+                        unsigned prev_cbp, unsigned *out)
 {
     unsigned cbp = 0, mask = 0;
     int ones = popcount16(prev_cbp);
@@ -370,18 +370,18 @@ static unsigned new_cbp_luma(Bink2Video *v, Bink2Bits *bits,
     }
     bit = bink2_bits_read1(bits);
     if (bit < 0)
-        return 0;
+        return -1;
     if (bit == 0) {
         if (ones < 4) {
             for (i = 0; i < 16; i += 4) {
                 bit = bink2_bits_read1(bits);
                 if (bit < 0)
-                    return 0;
+                    return -1;
                 if (!bit) {
                     int value = bink2_bits_read(bits, 4);
 
                     if (value < 0)
-                        return 0;
+                        return -1;
                     cbp |= (unsigned)value << i;
                 }
             }
@@ -389,7 +389,7 @@ static unsigned new_cbp_luma(Bink2Video *v, Bink2Bits *bits,
             int value = bink2_bits_read(bits, 16);
 
             if (value < 0)
-                return 0;
+                return -1;
             cbp = (unsigned)value;
         }
     }
@@ -397,34 +397,37 @@ static unsigned new_cbp_luma(Bink2Video *v, Bink2Bits *bits,
     if (!(v->frame_flags & 0x40000) || cbp) {
         bit = bink2_bits_read1(bits);
         if (bit < 0)
-            return 0;
+            return -1;
         if (bit)
             cbp |= cbp << 16;
     }
-    return cbp;
+    *out = cbp;
+    return 0;
 }
 
-static unsigned new_cbp_chroma(Bink2Bits *bits, unsigned prev_cbp)
+static int new_cbp_chroma(Bink2Bits *bits, unsigned prev_cbp,
+                          unsigned *out)
 {
     unsigned cbp = (prev_cbp & 0xF0000u) |
                    new_chroma_cbp_pat[prev_cbp & 0xF];
     int bit = bink2_bits_read1(bits);
 
     if (bit < 0)
-        return 0;
+        return -1;
     if (bit == 0) {
         int value = bink2_bits_read(bits, 4);
 
         if (value < 0)
-            return 0;
+            return -1;
         cbp = (unsigned)value;
         bit = bink2_bits_read1(bits);
         if (bit < 0)
-            return 0;
+            return -1;
         if (bit)
             cbp |= cbp << 16;
     }
-    return cbp;
+    *out = cbp;
+    return 0;
 }
 
 static int new_decode_dc(Bink2Video *v, Bink2Bits *bits, int is_luma,
@@ -437,24 +440,30 @@ static int new_decode_dc(Bink2Video *v, Bink2Bits *bits, int is_luma,
     q = q < 8 ? 8 : q;
     pat = new_dc_pat[q];
 
-    if (bink2_bits_read1(bits) == 1) {
-        for (i = 0; i < num_dc; i++) {
-            int cnt = bink2_bits_read_unary(bits, 0, 12);
+    {
+        int has_dc = bink2_bits_read1(bits);
 
-            if (cnt < 0)
-                return -1;
-            if (cnt > 3)
-                cnt = (1 << (cnt - 3)) +
-                      bink2_bits_read(bits, cnt - 3) + 2;
-            if (cnt) {
-                int sign = bink2_bits_read1(bits);
+        if (has_dc < 0)
+            return -1;
+        if (has_dc == 1) {
+            for (i = 0; i < num_dc; i++) {
+                int cnt = bink2_bits_read_unary(bits, 0, 12);
 
-                if (sign < 0)
+                if (cnt < 0)
                     return -1;
-                if (sign)
-                    cnt = -cnt;
+                if (cnt > 3)
+                    cnt = (1 << (cnt - 3)) +
+                          bink2_bits_read(bits, cnt - 3) + 2;
+                if (cnt) {
+                    int sign = bink2_bits_read1(bits);
+
+                    if (sign < 0)
+                        return -1;
+                    if (sign)
+                        cnt = -cnt;
+                }
+                tdc[i] = (float)((cnt * pat + 0x200) >> 10);
             }
-            tdc[i] = (float)((cnt * pat + 0x200) >> 10);
         }
     }
     bink2_video_predict_dc(v, is_luma, (float)mindc, (float)maxdc, flags,
@@ -559,15 +568,19 @@ static int new_decode_intra_luma(Bink2Video *v, Bink2Bits *bits,
     unsigned cbp;
     int i, j;
 
-    cbp = new_cbp_luma(v, bits, *prev_cbp);
-    *prev_cbp = cbp;
-    if (new_decode_dc(v, bits, 1, q, 0, 2047, flags) != 0)
+    if (new_cbp_luma(v, bits, *prev_cbp, &cbp) != 0) {
         return -1;
+    }
+    *prev_cbp = cbp;
+    if (new_decode_dc(v, bits, 1, q, 0, 2047, flags) != 0) {
+        return -1;
+    }
 
     for (i = 0; i < 4; i++) {
         if (new_decode_ac(bits, block, cbp >> (4 * i), q,
-                          new_luma_intra_qmat) != 0)
+                          new_luma_intra_qmat) != 0) {
             return -1;
+        }
         for (j = 0; j < 4; j++) {
             int pos = bink2_luma_repos[i * 4 + j];
             int off = (pos & 3) * 8 + (pos >> 2) * 8 * stride;
@@ -588,7 +601,8 @@ static int new_decode_intra_chroma(Bink2Video *v, Bink2Bits *bits,
     unsigned cbp;
     int i;
 
-    cbp = new_cbp_chroma(bits, *prev_cbp);
+    if (new_cbp_chroma(bits, *prev_cbp, &cbp) != 0)
+        return -1;
     *prev_cbp = cbp;
     if (new_decode_dc(v, bits, 0, q, 0, 2047, flags) != 0)
         return -1;
@@ -912,7 +926,8 @@ static int new_decode_inter_luma(Bink2Video *v, Bink2Bits *bits,
     unsigned cbp;
     int i, j;
 
-    cbp = new_cbp_luma(v, bits, *prev_cbp);
+    if (new_cbp_luma(v, bits, *prev_cbp, &cbp) != 0)
+        return -1;
     *prev_cbp = cbp;
     (void)flags;
     if (new_decode_dc(v, bits, 1, q, -1023, 1023, 0xA8) != 0)
@@ -942,7 +957,8 @@ static int new_decode_inter_chroma(Bink2Video *v, Bink2Bits *bits,
     unsigned cbp;
     int i;
 
-    cbp = new_cbp_chroma(bits, *prev_cbp);
+    if (new_cbp_chroma(bits, *prev_cbp, &cbp) != 0)
+        return -1;
     *prev_cbp = cbp;
     if (new_decode_dc(v, bits, 0, q, -1023, 1023, 0xA8) != 0)
         return -1;
@@ -963,8 +979,9 @@ int bink2_video_decode_slice_new(Bink2Video *v, Bink2Bits *bits,
 {
     int y, x;
 
-    if (!is_keyframe && !v->has_prev)
+    if (!is_keyframe && !v->has_prev) {
         return BINK2_ERROR;
+    }
 
     memset(v->new_q_prev, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
     memset(v->old_mv_prev, 0, ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
@@ -1077,27 +1094,31 @@ int bink2_video_decode_slice_new(Bink2Video *v, Bink2Bits *bits,
                 dq = new_decode_dq(bits);
                 update_intra_q(v, intra_q, dq, flags);
                 q = *intra_q;
-                if (q < 0 || q >= 37)
+                if (q < 0 || q >= 37) {
                     return BINK2_ERROR;
+                }
 
                 v->old_comp = 0;
                 if (new_decode_intra_luma(v, bits, &y_cbp_intra, q,
                                           v->cur[0] +
                                           (size_t)y * v->stride[0] + x,
-                                          v->stride[0], flags) != 0)
+                                          v->stride[0], flags) != 0) {
                     return BINK2_ERROR;
+                }
                 v->old_comp = 1;
                 if (new_decode_intra_chroma(v, bits, &u_cbp_intra, q,
                                             v->cur[2] +
                                             (size_t)(y / 2) * v->stride[2] + x / 2,
-                                            v->stride[2], flags) != 0)
+                                            v->stride[2], flags) != 0) {
                     return BINK2_ERROR;
+                }
                 v->old_comp = 2;
                 if (new_decode_intra_chroma(v, bits, &v_cbp_intra, q,
                                             v->cur[1] +
                                             (size_t)(y / 2) * v->stride[1] + x / 2,
-                                            v->stride[1], flags) != 0)
+                                            v->stride[1], flags) != 0) {
                     return BINK2_ERROR;
+                }
                 if (v->has_alpha) {
                     v->old_comp = 3;
                     if (new_decode_intra_luma(v, bits, &a_cbp_intra, q,
@@ -1130,8 +1151,9 @@ int bink2_video_decode_slice_new(Bink2Video *v, Bink2Bits *bits,
                 dq = new_decode_dq(bits);
                 update_inter_q(v, inter_q, dq, flags);
                 q = *inter_q;
-                if (q < 0 || q >= 37)
+                if (q < 0 || q >= 37) {
                     return BINK2_ERROR;
+                }
                 bink2_video_mc_luma(v, x, y);
                 bink2_video_mc_chroma(v, x, y);
                 v->old_comp = 0;
