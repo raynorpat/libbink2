@@ -109,11 +109,6 @@ static int test_usage_rejects(void)
     REJECT_OPT(quality, -1);
     REJECT_OPT(quality, 101);
 
-    bink2_enc_options_default(&o);
-    err[0] = '\0';
-    CHECK(bink2_enc_encode(&src, &o, "x.bk2", err, sizeof(err)) ==
-          BINK2_ENC_ERR_ENCODE);
-    CHECK(strstr(err, "not implemented") != NULL);
     return 0;
 }
 

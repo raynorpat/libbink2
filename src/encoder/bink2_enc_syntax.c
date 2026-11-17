@@ -279,7 +279,10 @@ void bink2_write_acs(Bink2BitWriter *bw, const int32_t levels[64],
         write_ac_value(bw, value);
         idx = s + 1;
     }
-    write_skip(bw, skip_codes, skip_bits, 64);
+    /* If the last coded coefficient is scan position 63 the reader's loop
+     * ends without consuming a terminator. */
+    if (idx < 64)
+        write_skip(bw, skip_codes, skip_bits, 64);
 }
 
 static int small_mv_index(int value)
