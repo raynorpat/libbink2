@@ -590,7 +590,13 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
                 flags |= 0x40;
 
             v->old_mb_pos = mb;
-            if (range == 0 || bink2_me_sad(src, ref, x, y, 0, 0) <= 32 * 32 * 4) {
+            {
+                int vx = src->width - x < 32 ? src->width - x : 32;
+                int vy = src->height - y < 32 ? src->height - y : 32;
+                int visible = vx * vy;
+
+                if (range == 0 ||
+                    bink2_me_sad(src, ref, x, y, 0, 0) <= visible * 4) {
                 type = 1;
                 bink2_write_btype(bw, lru, type);
                 update_inter_q(v, &v->new_q_cur[mb].inter_q, 0, flags);
@@ -598,6 +604,7 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
                 bink2_video_copy_mb(v, x, y);
                 bink2_enc_count_block(type);
                 continue;
+                }
             }
             bink2_me_search(src, ref, x, y, range, four_mv, mv, &nb);
 
@@ -607,7 +614,11 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
             sad = block_sad(src, v, x, y);
             update_intra_q(v, &v->new_q_cur[mb].intra_q, 0, flags);
 
-            if (sad <= 32 * 32 * 2) {
+            {
+                int vx = src->width - x < 32 ? src->width - x : 32;
+                int vy = src->height - y < 32 ? src->height - y : 32;
+
+                if (sad <= vx * vy * 2) {
                 type = 2;
                 bink2_write_btype(bw, lru, type);
                 update_inter_q(v, &v->new_q_cur[mb].inter_q, 0, flags);
@@ -633,6 +644,7 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
                                        &prev_v);
                 encode_residual_chroma(bw, v, src, 1, 2, x, y, q,
                                        &prev_u);
+                }
             }
             bink2_video_store_motion(v, x, y, nb);
             bink2_enc_count_block(type);

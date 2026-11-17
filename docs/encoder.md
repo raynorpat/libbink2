@@ -101,8 +101,8 @@ reconstruction are independent of that post-filter.
 `tools/validate.sh file.bk2` runs the pinned FFmpeg Bink 2 oracle with
 `-v error` and fails on any diagnostic. The pinned oracle has a
 `slice_height[4]` array bug in its 8-slice path, so it rejects valid 8-slice
-files; the script skips the oracle for those and the library's own decoder
-round trip covers them. Set `FFMPEG_BINK2` to point at a different build. Set
+files; the script exits 77 (the project's skip code) for those and the
+library's own decoder round trip covers them. Set `FFMPEG_BINK2` to point at a different build. Set
 `BINK2ENC_BIN` and `BINK2_VALIDATE_YUV` (plus optional
 `BINK2_VALIDATE_WIDTH/HEIGHT/FPS`) to also encode the same raw clip with the
 independent `bink2enc` and print both file sizes.

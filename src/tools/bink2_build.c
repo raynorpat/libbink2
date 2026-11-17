@@ -558,6 +558,7 @@ int main(int argc, char **argv)
     source.read_frame = input_read_frame;
     options.recon_path = recon;
     options.verify = verify;
+    options.verbose = verbose;
 
     if (verbose)
         fprintf(stderr, "bink2_build: encoding %s\n", image_input);

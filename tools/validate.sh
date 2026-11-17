@@ -17,10 +17,14 @@ if [ ! -x "$ORACLE" ]; then
     exit 2
 fi
 
-FLAGS=$(python3 -c 'import struct,sys; print(struct.unpack_from("<I", open(sys.argv[1], "rb").read(40), 36)[0])' "$FILE")
-if [ $((FLAGS & 3)) -eq 3 ]; then
-    echo "validate: 8-slice streams are not oracle-validated (pinned FFmpeg slice_height[4] bug); relying on the library round trip"
-    exit 0
+if command -v python3 >/dev/null 2>&1; then
+    SKIP=$(python3 -c 'import struct,sys; d=open(sys.argv[1],"rb").read(40); v=chr(d[3]); f=struct.unpack_from("<I",d,36)[0]; print(1 if v>="h" and (f & 3) == 3 else 0)' "$FILE")
+else
+    SKIP=0
+fi
+if [ "$SKIP" -eq 1 ]; then
+    echo "validate: 8-slice streams are not oracle-validated (pinned FFmpeg slice_height[4] bug); skipped (77)"
+    exit 77
 fi
 
 : > "$LOG"

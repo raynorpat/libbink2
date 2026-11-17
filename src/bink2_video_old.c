@@ -761,20 +761,26 @@ void bink2_video_mc_luma(Bink2Video *v, int x, int y)
 void bink2_video_mc_chroma(Bink2Video *v, int x, int y)
 {
     int32_t *mv = v->old_mv_cur + v->old_mb_pos * 8;
+    /* The pinned reference passes width/2 and height/2. Clamp only the
+     * degenerate 1-pixel case, which used to build a zero-size edge buffer. */
+    int cw = (int)v->width / 2;
+    int ch = (int)v->height / 2;
     int k;
 
+    if (cw < 1)
+        cw = 1;
+    if (ch < 1)
+        ch = 1;
     for (k = 0; k < 4; k++) {
         int bx = x / 2 + (k & 1) * 8;
         int by = y / 2 + (k >> 1) * 8;
 
         bink2_mc_chroma(v->cur[2] + (size_t)by * v->stride[2] + bx,
                         v->stride[2], v->ref[2], v->stride[2],
-                        bx, by, v->plane_w[1], v->plane_h[1],
-                        mv[k * 2], mv[k * 2 + 1]);
+                        bx, by, cw, ch, mv[k * 2], mv[k * 2 + 1]);
         bink2_mc_chroma(v->cur[1] + (size_t)by * v->stride[1] + bx,
                         v->stride[1], v->ref[1], v->stride[1],
-                        bx, by, v->plane_w[1], v->plane_h[1],
-                        mv[k * 2], mv[k * 2 + 1]);
+                        bx, by, cw, ch, mv[k * 2], mv[k * 2 + 1]);
     }
 }
 

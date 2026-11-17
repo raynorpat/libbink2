@@ -77,4 +77,6 @@ BINK2_TEST_MEDIA="$HOME/Downloads" ctest --test-dir build --output-on-failure
 
 Golden checksums are generated from the pinned FFmpeg Bink 2 oracle and the
 `bink2enc`-generated `KB2j` fixture; see `tests/README.md`. `tools/validate.sh`
-runs the pinned oracle over an encoded file and fails on any diagnostic.
+runs the pinned oracle over an encoded file and fails on any diagnostic;
+8-slice files exit 77 because the pinned oracle's 8-slice path is broken, and
+the library round trip covers them.

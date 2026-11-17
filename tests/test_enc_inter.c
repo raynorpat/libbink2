@@ -117,6 +117,8 @@ int main(void)
     FILE *file;
     bink2 b;
 
+    CHECK(test_mv_inversion() == 0);
+
     memset(&src, 0, sizeof(src));
     src.width = TEST_WIDTH;
     src.height = TEST_HEIGHT;

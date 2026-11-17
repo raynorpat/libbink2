@@ -1,5 +1,6 @@
 #include "bink2.h"
 #include "bink2_encoder.h"
+#include "bink2_enc_motion.h"
 
 #include "test_common.h"
 
@@ -187,11 +188,13 @@ int main(void)
         ctx.width = tiny[s][0];
         ctx.height = tiny[s][1];
         ctx.moving = 0;
-        ctx.flash = 97;
+        ctx.flash = 8;
         snprintf(path, sizeof(path), "test_opt_tiny_%d.bk2", s);
         snprintf(recon, sizeof(recon), "test_opt_tiny_%d.yuv", s);
         CHECK(encode_clip(path, recon, &ctx, 3, 2, 1, 150, 2) ==
               BINK2_ENC_OK);
+        CHECK(bink2_enc_last_stats()->motion +
+              bink2_enc_last_stats()->residual > 0);
         CHECK(compare_file(path, recon, ctx.width, ctx.height, 3, 0) == 0);
         remove(path);
         remove(recon);
