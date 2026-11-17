@@ -67,6 +67,12 @@ else()
 endif()
 add_library(Bink2::bink2 ALIAS ${BINK2_LINK_TARGET})
 
+if(BINK2_BUILD_TOOLS)
+  add_executable(bink2_dump src/tools/bink2_dump.c)
+  bink2_set_compile_settings(bink2_dump)
+  target_link_libraries(bink2_dump PRIVATE ${BINK2_LINK_TARGET})
+endif()
+
 if(BINK2_BUILD_ENCODER)
   message(STATUS "BINK2_BUILD_ENCODER is not implemented yet")
 endif()
@@ -89,3 +95,7 @@ if(BINK2_BUILD_SHARED)
 endif()
 
 install(FILES src/bink2.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+if(BINK2_BUILD_TOOLS)
+  install(TARGETS bink2_dump RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
+endif()

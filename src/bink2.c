@@ -70,7 +70,6 @@ static int parse_container(bink2 b)
     b->fps_num = le32(hdr + 28);
     b->fps_den = le32(hdr + 32);
     b->flags = le32(hdr + 36);
-    b->audio_tracks = (int)le32(hdr + 40);
 
     if (declared < BINK2_HEADER_SIZE)
         return -1;
@@ -81,8 +80,13 @@ static int parse_container(bink2 b)
         return -1;
     if (b->fps_num == 0 || b->fps_den == 0)
         return -1;
-    if (b->audio_tracks < 0 || b->audio_tracks > BINK2_MAX_AUDIO_TRACKS)
-        return -1;
+    {
+        int tracks = (int)le32(hdr + 40);
+
+        if (tracks < 0 || tracks > BINK2_MAX_AUDIO_TRACKS)
+            return -1;
+        b->audio_tracks = tracks;
+    }
 
     if (b->version >= 'i')
         off += 4;
@@ -245,8 +249,11 @@ void bink2_close(bink2 object)
         return;
     {
         int i;
+        int tracks = object->audio_tracks;
 
-        for (i = 0; i < object->audio_tracks; i++)
+        if (tracks < 0 || tracks > BINK2_MAX_AUDIO_TRACKS)
+            tracks = 0;
+        for (i = 0; i < tracks; i++)
             bink2_audio_destroy(object->audio[i].decoder);
     }
     free(object->frame_offsets);
