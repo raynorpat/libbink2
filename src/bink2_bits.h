@@ -21,6 +21,8 @@ int bink2_bits_read1(Bink2Bits *bits);
  */
 int bink2_bits_read_unary(Bink2Bits *bits, int stop, int max);
 int bink2_bits_left(const Bink2Bits *bits);
+/** True after a read helper ran past the buffer (it marks bitpos). */
+int bink2_bits_failed(const Bink2Bits *bits);
 void bink2_bits_skip(Bink2Bits *bits, int count);
 void bink2_bits_align32(Bink2Bits *bits);
 

@@ -1,4 +1,5 @@
 #include "bink2_tables.h"
+#include "bink2_video_new.h"
 #include "bink2_video.h"
 #include "bink2_dsp.h"
 
@@ -68,38 +69,56 @@ static int new_read_vlc(Bink2Bits *bits, const uint16_t *codes,
 
 static int new_decode_dq(Bink2Bits *bits)
 {
+    return bink2_new_read_quant(bits, 0);
+}
+
+static void mark_failed(Bink2Bits *bits)
+{
+    bits->bitpos = (size_t)-1;
+}
+
+int bink2_new_read_quant(Bink2Bits *bits, int prev_q)
+{
     int dq = bink2_bits_read_unary(bits, 1, 4);
 
-    if (dq < 0)
+    if (dq < 0) {
+        mark_failed(bits);
         return -1;
+    }
     if (dq == 3) {
         int bit = bink2_bits_read1(bits);
 
-        if (bit < 0)
+        if (bit < 0) {
+            mark_failed(bits);
             return -1;
+        }
         dq += bit;
     } else if (dq == 4) {
         int extra = bink2_bits_read(bits, 5);
 
-        if (extra < 0)
+        if (extra < 0) {
+            mark_failed(bits);
             return -1;
+        }
         dq += extra + 1;
     }
     if (dq) {
         int sign = bink2_bits_read1(bits);
 
-        if (sign < 0)
+        if (sign < 0) {
+            mark_failed(bits);
             return -1;
+        }
         if (sign)
             dq = -dq;
     }
-    return dq;
+    return prev_q + dq;
 }
 
-static int new_cbp_luma(Bink2Video *v, Bink2Bits *bits,
-                        unsigned prev_cbp, unsigned *out)
+uint32_t bink2_new_read_cbp_luma(Bink2Bits *bits, uint32_t prev_cbp,
+                                 uint32_t edge)
 {
-    unsigned cbp = 0, mask = 0;
+    uint32_t cbp = 0, mask = 0;
     int ones = popcount16(prev_cbp);
     int bit, i;
 
@@ -108,119 +127,145 @@ static int new_cbp_luma(Bink2Video *v, Bink2Bits *bits,
         mask = 0xFFFF;
     }
     bit = bink2_bits_read1(bits);
-    if (bit < 0)
-        return -1;
+    if (bit < 0) {
+        mark_failed(bits);
+        return 0;
+    }
     if (bit == 0) {
         if (ones < 4) {
             for (i = 0; i < 16; i += 4) {
                 bit = bink2_bits_read1(bits);
-                if (bit < 0)
-                    return -1;
+                if (bit < 0) {
+                    mark_failed(bits);
+                    return 0;
+                }
                 if (!bit) {
                     int value = bink2_bits_read(bits, 4);
 
-                    if (value < 0)
-                        return -1;
-                    cbp |= (unsigned)value << i;
+                    if (value < 0) {
+                        mark_failed(bits);
+                        return 0;
+                    }
+                    cbp |= (uint32_t)value << i;
                 }
             }
         } else {
             int value = bink2_bits_read(bits, 16);
 
-            if (value < 0)
-                return -1;
-            cbp = (unsigned)value;
+            if (value < 0) {
+                mark_failed(bits);
+                return 0;
+            }
+            cbp = (uint32_t)value;
         }
     }
     cbp ^= mask;
-    if (!(v->frame_flags & 0x40000) || cbp) {
+    if (!edge || cbp) {
         bit = bink2_bits_read1(bits);
-        if (bit < 0)
-            return -1;
+        if (bit < 0) {
+            mark_failed(bits);
+            return 0;
+        }
         if (bit)
             cbp |= cbp << 16;
     }
-    *out = cbp;
-    return 0;
+    return cbp;
 }
 
-static int new_cbp_chroma(Bink2Bits *bits, unsigned prev_cbp,
-                          unsigned *out)
+uint32_t bink2_new_read_cbp_chroma(Bink2Bits *bits, uint32_t prev_cbp)
 {
-    unsigned cbp = (prev_cbp & 0xF0000u) |
+    uint32_t cbp = (prev_cbp & 0xF0000u) |
                    new_chroma_cbp_pat[prev_cbp & 0xF];
     int bit = bink2_bits_read1(bits);
 
-    if (bit < 0)
-        return -1;
+    if (bit < 0) {
+        mark_failed(bits);
+        return 0;
+    }
     if (bit == 0) {
         int value = bink2_bits_read(bits, 4);
 
-        if (value < 0)
-            return -1;
-        cbp = (unsigned)value;
+        if (value < 0) {
+            mark_failed(bits);
+            return 0;
+        }
+        cbp = (uint32_t)value;
         bit = bink2_bits_read1(bits);
-        if (bit < 0)
-            return -1;
+        if (bit < 0) {
+            mark_failed(bits);
+            return 0;
+        }
         if (bit)
             cbp |= cbp << 16;
     }
-    *out = cbp;
-    return 0;
+    return cbp;
 }
 
-static int new_decode_dc(Bink2Video *v, Bink2Bits *bits, int is_luma,
-                         int q, int mindc, int maxdc, int flags)
+void bink2_new_read_dcs(Bink2Bits *bits, int32_t dcs[16], int count, int q)
 {
-    float tdc[16] = { 0 };
-    int num_dc = is_luma ? 16 : 4;
     int pat, i;
 
     q = q < 8 ? 8 : q;
     pat = bink2g_dc_pat[q];
-
     {
         int has_dc = bink2_bits_read1(bits);
 
-        if (has_dc < 0)
-            return -1;
-        if (has_dc == 1) {
-            for (i = 0; i < num_dc; i++) {
-                int cnt = bink2_bits_read_unary(bits, 0, 12);
-
-                if (cnt < 0)
-                    return -1;
-                if (cnt > 3)
-                    cnt = (1 << (cnt - 3)) +
-                          bink2_bits_read(bits, cnt - 3) + 2;
-                if (cnt) {
-                    int sign = bink2_bits_read1(bits);
-
-                    if (sign < 0)
-                        return -1;
-                    if (sign)
-                        cnt = -cnt;
-                }
-                tdc[i] = (float)((cnt * pat + 0x200) >> 10);
-            }
+        if (has_dc < 0) {
+            mark_failed(bits);
+            memset(dcs, 0, (size_t)count * sizeof(int32_t));
+            return;
+        }
+        if (has_dc != 1) {
+            memset(dcs, 0, (size_t)count * sizeof(int32_t));
+            return;
         }
     }
-    bink2_video_predict_dc(v, is_luma, (float)mindc, (float)maxdc, flags,
-                           tdc);
-    return 0;
+    for (i = 0; i < count; i++) {
+        int cnt = bink2_bits_read_unary(bits, 0, 12);
+
+        if (cnt < 0) {
+            mark_failed(bits);
+            memset(dcs, 0, (size_t)count * sizeof(int32_t));
+            return;
+        }
+        if (cnt > 3) {
+            int extra = bink2_bits_read(bits, cnt - 3);
+
+            if (extra < 0) {
+                mark_failed(bits);
+                memset(dcs, 0, (size_t)count * sizeof(int32_t));
+                return;
+            }
+            cnt = (1 << (cnt - 3)) + extra + 2;
+        }
+        if (cnt) {
+            int sign = bink2_bits_read1(bits);
+
+            if (sign < 0) {
+                mark_failed(bits);
+                memset(dcs, 0, (size_t)count * sizeof(int32_t));
+                return;
+            }
+            if (sign)
+                cnt = -cnt;
+        }
+        dcs[i] = (int32_t)(((int64_t)cnt * pat + 0x200) >> 10);
+    }
 }
 
-static int new_decode_ac(Bink2Bits *bits, int16_t block[4][64],
-                         unsigned cbp, int q, const uint16_t qmat[4][64])
+void bink2_new_read_acs(Bink2Bits *bits, int32_t levels[64],
+                        const uint16_t qmat[4][64], int q, uint32_t cbp)
 {
     const uint16_t *skip_codes;
     const uint8_t *skip_bits;
-    int i;
+    int idx = 1;
+    int next = 0;
 
-    for (i = 0; i < 4; i++)
-        memset(block[i], 0, 64 * sizeof(int16_t));
-    if ((cbp & 0xF) == 0)
-        return 0;
+    (void)qmat;
+    (void)q;
+    memset(levels, 0, 64 * sizeof(int32_t));
+    if (!(cbp & 1))
+        return;
 
     if (cbp & 0xFFFF0000u) {
         skip_codes = bink2g_ac_skip_codes[1];
@@ -230,57 +275,97 @@ static int new_decode_ac(Bink2Bits *bits, int16_t block[4][64],
         skip_bits = bink2g_ac_skip_bits[0];
     }
 
-    for (i = 0; i < 4; i++, cbp >>= 1) {
-        int next = 0;
-        int idx = 1;
+    while (idx < 64) {
+        int val;
 
-        if (!(cbp & 1))
-            continue;
-        while (idx < 64) {
-            int val;
+        next--;
+        if (next < 1) {
+            int skip = new_read_vlc(bits, skip_codes, skip_bits, 14);
 
-            next--;
-            if (next < 1) {
-                int skip = new_read_vlc(bits, skip_codes, skip_bits, 14);
-
-                if (skip < 0)
-                    return -1;
-                next = bink2_next_skips[skip];
-                skip = new_skips[skip];
-                if (skip == 11) {
-                    skip = bink2_bits_read(bits, 6);
-                    if (skip < 0)
-                        return -1;
+            if (skip < 0) {
+                mark_failed(bits);
+                return;
+            }
+            next = bink2_next_skips[skip];
+            skip = new_skips[skip];
+            if (skip == 11) {
+                skip = bink2_bits_read(bits, 6);
+                if (skip < 0) {
+                    mark_failed(bits);
+                    return;
                 }
-                idx += skip;
-                if (idx >= 64)
-                    break;
             }
+            idx += skip;
+            if (idx >= 64)
+                break;
+        }
 
-            val = bink2_bits_read_unary(bits, 0, 12) + 1;
-            if (val < 1)
-                return -1;
-            if (val > 3) {
-                int nbits = val - 3;
+        val = bink2_bits_read_unary(bits, 0, 12) + 1;
+        if (val < 1) {
+            mark_failed(bits);
+            return;
+        }
+        if (val > 3) {
+            int nbits = val - 3;
+            int extra = bink2_bits_read(bits, nbits);
 
-                val = bink2_bits_read(bits, nbits) + (1 << nbits) + 2;
-                if (val < 0)
-                    return -1;
+            if (extra < 0) {
+                mark_failed(bits);
+                return;
             }
-            {
-                int sign = bink2_bits_read1(bits);
-                int64_t level;
+            val = extra + (1 << nbits) + 2;
+        }
+        {
+            int sign = bink2_bits_read1(bits);
 
-                if (sign < 0)
-                    return -1;
-                if (sign)
-                    val = -val;
-                level = (int64_t)val * qmat[q & 3][bink2g_scan[idx]] *
-                        (1 << (q >> 2));
-                block[i][bink2g_scan[idx]] =
-                    (int16_t)((level + 64) >> 7);
+            if (sign < 0) {
+                mark_failed(bits);
+                return;
             }
-            idx++;
+            if (sign)
+                val = -val;
+        }
+        levels[bink2g_scan[idx]] = val;
+        idx++;
+    }
+}
+
+static int new_decode_dc(Bink2Video *v, Bink2Bits *bits, int is_luma,
+                         int q, int mindc, int maxdc, int flags)
+{
+    float tdc[16];
+    int32_t raw[16];
+    int num_dc = is_luma ? 16 : 4;
+    int i;
+
+    bink2_new_read_dcs(bits, raw, num_dc, q);
+    if (bink2_bits_failed(bits))
+        return -1;
+    for (i = 0; i < num_dc; i++)
+        tdc[i] = (float)raw[i];
+    bink2_video_predict_dc(v, is_luma, (float)mindc, (float)maxdc, flags,
+                           tdc);
+    return 0;
+}
+
+static int new_decode_ac(Bink2Bits *bits, int16_t block[4][64],
+                         unsigned cbp, int q,
+                         const uint16_t qmat[4][64])
+{
+    int i, j;
+
+    for (i = 0; i < 4; i++) {
+        int32_t vals[64];
+        uint32_t block_cbp = (cbp & 0xFFFF0000u) | ((cbp >> i) & 1u);
+
+        bink2_new_read_acs(bits, vals, qmat, q, block_cbp);
+        if (bink2_bits_failed(bits))
+            return -1;
+        for (j = 0; j < 64; j++) {
+            int64_t level = (int64_t)vals[j] * qmat[q & 3][j] *
+                            ((int64_t)1 << (q >> 2));
+
+            block[i][j] = (int16_t)((level + 64) >> 7);
         }
     }
     return 0;
@@ -307,9 +392,10 @@ static int new_decode_intra_luma(Bink2Video *v, Bink2Bits *bits,
     unsigned cbp;
     int i, j;
 
-    if (new_cbp_luma(v, bits, *prev_cbp, &cbp) != 0) {
+    cbp = bink2_new_read_cbp_luma(bits, *prev_cbp,
+                                  (uint32_t)(v->frame_flags & 0x40000));
+    if (bink2_bits_failed(bits))
         return -1;
-    }
     *prev_cbp = cbp;
     if (new_decode_dc(v, bits, 1, q, 0, 2047, flags) != 0) {
         return -1;
@@ -340,7 +426,8 @@ static int new_decode_intra_chroma(Bink2Video *v, Bink2Bits *bits,
     unsigned cbp;
     int i;
 
-    if (new_cbp_chroma(bits, *prev_cbp, &cbp) != 0)
+    cbp = bink2_new_read_cbp_chroma(bits, *prev_cbp);
+    if (bink2_bits_failed(bits))
         return -1;
     *prev_cbp = cbp;
     if (new_decode_dc(v, bits, 0, q, 0, 2047, flags) != 0)
@@ -391,13 +478,15 @@ static void update_inter_q(Bink2Video *v, int8_t *q, int dq, int flags)
     }
 }
 
-static int new_get_type(Bink2Bits *bits, int lru[4])
+uint8_t bink2_new_read_btype(Bink2Bits *bits, uint8_t lru[4])
 {
     int mode = bink2_bits_read_unary(bits, 1, 3);
-    int value;
+    uint8_t value;
 
-    if (mode < 0)
-        return -1;
+    if (mode < 0) {
+        bits->bitpos = (size_t)-1;
+        return 0xFF;
+    }
     switch (mode) {
     case 0:
         value = lru[0];
@@ -424,32 +513,40 @@ static int new_get_type(Bink2Bits *bits, int lru[4])
     return value;
 }
 
-static int new_decode_mv(Bink2Bits *bits, int mv[4][2], int *nb)
+int bink2_new_read_mv(Bink2Bits *bits, int mv[4][2], int *nb)
 {
     int num = bink2_bits_read1(bits);
     int i, j;
 
-    if (num < 0)
+    if (num < 0) {
+        bits->bitpos = (size_t)-1;
         return -1;
+    }
     num = num ? 1 : 4;
     *nb = num;
     for (i = 0; i < 2; i++) {
         for (j = 0; j < num; j++) {
             int val = new_read_vlc(bits, bink2g_mv_codes, bink2g_mv_bits, 16);
 
-            if (val < 0)
+            if (val < 0) {
+                bits->bitpos = (size_t)-1;
                 return -1;
+            }
             if (val >= 8 && val != 15)
                 val -= 15;
             if (val == 15) {
                 int nbits = bink2_bits_read_unary(bits, 1, 12) + 4;
                 int raw;
 
-                if (nbits < 0)
+                if (nbits < 0) {
+                    bits->bitpos = (size_t)-1;
                     return -1;
+                }
                 raw = bink2_bits_read(bits, nbits);
-                if (raw < 0)
+                if (raw < 0) {
+                    bits->bitpos = (size_t)-1;
                     return -1;
+                }
                 val = raw + (1 << nbits) - 1;
                 if (val & 1)
                     val = -(val >> 1) - 1;
@@ -665,7 +762,9 @@ static int new_decode_inter_luma(Bink2Video *v, Bink2Bits *bits,
     unsigned cbp;
     int i, j;
 
-    if (new_cbp_luma(v, bits, *prev_cbp, &cbp) != 0)
+    cbp = bink2_new_read_cbp_luma(bits, *prev_cbp,
+                                  (uint32_t)(v->frame_flags & 0x40000));
+    if (bink2_bits_failed(bits))
         return -1;
     *prev_cbp = cbp;
     (void)flags;
@@ -696,7 +795,8 @@ static int new_decode_inter_chroma(Bink2Video *v, Bink2Bits *bits,
     unsigned cbp;
     int i;
 
-    if (new_cbp_chroma(bits, *prev_cbp, &cbp) != 0)
+    cbp = bink2_new_read_cbp_chroma(bits, *prev_cbp);
+    if (bink2_bits_failed(bits))
         return -1;
     *prev_cbp = cbp;
     if (new_decode_dc(v, bits, 0, q, -1023, 1023, 0xA8) != 0)
@@ -726,7 +826,7 @@ int bink2_video_decode_slice_new(Bink2Video *v, Bink2Bits *bits,
     memset(v->old_mv_prev, 0, ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
 
     for (y = y0; y < y1; y += 32) {
-        int types_lru[4] = { 2, 3, 1, 0 };
+        uint8_t types_lru[4] = { 2, 3, 1, 0 };
         unsigned y_cbp_intra = 0, u_cbp_intra = 0, v_cbp_intra = 0;
         unsigned a_cbp_intra = 0;
         unsigned y_cbp_inter = 0, u_cbp_inter = 0, v_cbp_inter = 0;
@@ -744,8 +844,8 @@ int bink2_video_decode_slice_new(Bink2Video *v, Bink2Bits *bits,
             if (is_keyframe) {
                 type = 0;
             } else {
-                type = new_get_type(bits, types_lru);
-                if (type < 0)
+                type = bink2_new_read_btype(bits, types_lru);
+                if (type > 3)
                     return BINK2_ERROR;
             }
             if (y == y0)
@@ -831,6 +931,8 @@ int bink2_video_decode_slice_new(Bink2Video *v, Bink2Bits *bits,
                 new_predict_mv(v, flags, raw, 0);
                 update_inter_q(v, inter_q, 0, flags);
                 dq = new_decode_dq(bits);
+                if (bink2_bits_failed(bits))
+                    return BINK2_ERROR;
                 update_intra_q(v, intra_q, dq, flags);
                 q = *intra_q;
                 if (q < 0 || q >= 37) {
@@ -875,7 +977,7 @@ int bink2_video_decode_slice_new(Bink2Video *v, Bink2Bits *bits,
             case 2:
                 update_intra_q(v, intra_q, 0, flags);
                 update_inter_q(v, inter_q, 0, flags);
-                if (new_decode_mv(bits, raw, &nb) != 0)
+                if (bink2_new_read_mv(bits, raw, &nb) != 0)
                     return BINK2_ERROR;
                 new_predict_mv(v, flags, raw, nb);
                 bink2_video_mc_luma(v, x, y);
@@ -884,10 +986,12 @@ int bink2_video_decode_slice_new(Bink2Video *v, Bink2Bits *bits,
                 break;
             case 3:
                 update_intra_q(v, intra_q, 0, flags);
-                if (new_decode_mv(bits, raw, &nb) != 0)
+                if (bink2_new_read_mv(bits, raw, &nb) != 0)
                     return BINK2_ERROR;
                 new_predict_mv(v, flags, raw, nb);
                 dq = new_decode_dq(bits);
+                if (bink2_bits_failed(bits))
+                    return BINK2_ERROR;
                 update_inter_q(v, inter_q, dq, flags);
                 q = *inter_q;
                 if (q < 0 || q >= 37) {

@@ -122,7 +122,8 @@ if(BINK2_BUILD_ENCODER)
   set(BINK2_ENCODER_SOURCES
     src/encoder/bink2_encoder.c
     src/encoder/bink2_enc_bits.c
-    src/encoder/bink2_enc_dct.c)
+    src/encoder/bink2_enc_dct.c
+    src/encoder/bink2_enc_syntax.c)
   add_library(bink2_encoder STATIC ${BINK2_ENCODER_SOURCES})
   bink2_set_compile_settings(bink2_encoder)
   target_include_directories(bink2_encoder PUBLIC

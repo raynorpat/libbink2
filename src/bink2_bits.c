@@ -20,6 +20,11 @@ int bink2_bits_left(const Bink2Bits *bits)
     return (int)(total - bits->bitpos);
 }
 
+int bink2_bits_failed(const Bink2Bits *bits)
+{
+    return bits->bitpos > bits->size * 8;
+}
+
 int bink2_bits_read(Bink2Bits *bits, int count)
 {
     uint32_t value = 0;
