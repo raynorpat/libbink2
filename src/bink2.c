@@ -1,4 +1,5 @@
 #include "bink2_internal.h"
+#include "bink2_video.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -239,6 +240,10 @@ void bink2_close(bink2 object)
     free(object->frame_sizes);
     free(object->frame_keyframes);
     free(object->frame_data);
+    if (object->video != NULL) {
+        bink2_video_uninit(object->video);
+        free(object->video);
+    }
     if (object->owns_file && object->file != NULL)
         fclose(object->file);
     free(object);
@@ -378,46 +383,91 @@ int bink2_internal_load_frame(bink2 object, unsigned long frame)
     return BINK2_OK;
 }
 
+static int ensure_video(bink2 object)
+{
+    if (!object->video_enabled)
+        return -1;
+    if (object->video == NULL) {
+        object->video = (Bink2Video *)calloc(1, sizeof(Bink2Video));
+        if (object->video == NULL)
+            return -1;
+        if (bink2_video_init(object->video, object->width, object->height,
+                             object->flags, object->version) != 0) {
+            free(object->video);
+            object->video = NULL;
+            return -1;
+        }
+    }
+    return 0;
+}
+
+static char decode_frame(bink2 object, unsigned long frame)
+{
+    int status = bink2_internal_load_frame(object, frame);
+
+    if (status != BINK2_OK)
+        return (char)status;
+    if (object->video_enabled) {
+        if (ensure_video(object) != 0)
+            return BINK2_ERROR;
+        if (bink2_video_decode(object->video, object->video_data,
+                               object->video_size,
+                               object->frame_keyframes[frame]) != 0)
+            return BINK2_ERROR;
+    }
+    object->current_frame = frame;
+    return frame + 1 < object->frame_count ? BINK2_MORE : BINK2_LAST;
+}
+
 char bink2_first(bink2 object)
 {
-    if (object == NULL)
+    if (object == NULL || object->frame_count == 0)
         return BINK2_ERROR;
-    return BINK2_ERROR;
+    return decode_frame(object, 0);
 }
 
 char bink2_next(bink2 object)
 {
     if (object == NULL)
         return BINK2_ERROR;
-    return BINK2_ERROR;
+    if (object->current_frame + 1 >= object->frame_count)
+        return BINK2_LAST;
+    return decode_frame(object, object->current_frame + 1);
 }
 
 char bink2_seek_keyframe(bink2 object, unsigned long frame)
 {
-    (void)frame;
-    if (object == NULL)
+    unsigned long target;
+
+    if (object == NULL || object->frame_count == 0)
         return BINK2_ERROR;
-    return BINK2_ERROR;
+    if (frame >= object->frame_count)
+        frame = object->frame_count - 1;
+    target = frame;
+    while (target > 0 && !object->frame_keyframes[target])
+        target--;
+    return decode_frame(object, target);
 }
 
 const unsigned char *bink2_get_video(const bink2 object)
 {
-    (void)object;
-    return NULL;
+    if (object == NULL || object->video == NULL)
+        return NULL;
+    return bink2_video_rgb(object->video);
 }
 
 const unsigned char *bink2_get_plane(const bink2 object, int plane)
 {
-    (void)object;
-    (void)plane;
-    return NULL;
+    if (object == NULL || object->video == NULL)
+        return NULL;
+    return bink2_video_plane(object->video, plane);
 }
 
 int bink2_get_stride(const bink2 object, int plane)
 {
-    (void)object;
-    (void)plane;
-    return 0;
+    if (object == NULL || object->video == NULL)
+        return 0;
+    return bink2_video_stride(object->video, plane);
 }
 
 const unsigned char *bink2_get_audio(const bink2 object, unsigned char track)
@@ -438,11 +488,8 @@ int bink2_get_motion(const bink2 object, unsigned long *mb_w,
                      unsigned long *mb_h, const int16_t **mv_x,
                      const int16_t **mv_y, const unsigned char **mv_count)
 {
-    (void)object;
-    (void)mb_w;
-    (void)mb_h;
-    (void)mv_x;
-    (void)mv_y;
-    (void)mv_count;
-    return 0;
+    if (object == NULL || object->video == NULL)
+        return 0;
+    return bink2_video_motion(object->video, mb_w, mb_h, mv_x, mv_y,
+                              mv_count);
 }

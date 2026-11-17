@@ -17,3 +17,8 @@ add_test(NAME frames COMMAND test_frames)
 add_executable(test_video test_video.c)
 target_link_libraries(test_video PRIVATE ${BINK2_LINK_TARGET})
 add_test(NAME video COMMAND test_video)
+
+add_executable(test_decode_f test_decode_f.c)
+target_link_libraries(test_decode_f PRIVATE ${BINK2_LINK_TARGET})
+add_test(NAME decode_f COMMAND test_decode_f)
+set_tests_properties(decode_f PROPERTIES SKIP_RETURN_CODE 77)
