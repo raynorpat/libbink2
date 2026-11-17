@@ -2,6 +2,8 @@
 
 `libbink2` is a C99 library for decoding Bink 2 video files (`.bk2`,
 `KB2*`), in the spirit of [libbink](https://github.com/raynorpat/libbink).
+It also includes a `KB2j` encoder and three command-line tools. It depends
+only on the C library.
 
 ## Status
 
@@ -15,19 +17,12 @@ The decoder and tools are implemented:
 - `bink2_dump`, `bink2_build` (images to `.bk2`), and an SDL player.
 
 The encoder writes `KB2j` from RGB images (PPM, BMP, PNG, JPEG) or a YUV
-source and supports quality and target-bitrate modes; see `docs/encoder.md`. The in-loop deblocking
-filter is not implemented on decode, matching the pinned FFmpeg reference;
-decoded output differs from RAD's decoder by a few levels around block edges.
+source and supports quality and target-bitrate modes; see `docs/encoder.md`.
+It does not write audio or alpha.
 
-## License
-
-`libbink2` is licensed under the GNU Lesser General Public License,
-version 2.1 or later. See `LICENSE`.
-
-The Bink 2 decoder is derived from the unmerged FFmpeg Bink 2 patches by
-Konstantin Shishkov and Paul B Mahol, which are LGPL-2.1-or-later. Bink Audio
-2 is derived from FFmpeg's `binkaudio.c` by Peter Ross and Daniel Verkamp.
-See `docs/bink2.md`.
+The in-loop deblocking filter is not implemented on decode, matching the
+pinned FFmpeg reference; decoded output differs from RAD's decoder by a few
+levels around block edges.
 
 ## Build
 
@@ -37,19 +32,27 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-Requires CMake 3.16 or newer and a C99 compiler. The SDL player is built when
-an SDL3 or SDL2 CMake package is found; `-DBINK2_SDL_VERSION=2` or `3` forces
-a backend.
+Requires CMake 3.16 or newer and a C99 compiler. The default build type is
+`Release`.
 
 Options:
 
-- `BINK2_BUILD_STATIC` (default `ON`)
-- `BINK2_BUILD_SHARED` (default `ON`)
-- `BINK2_BUILD_TOOLS` (default `OFF`) — builds `bink2_dump` and the player
-- `BINK2_BUILD_TESTS` (default `ON`)
-- `BINK2_SDL_VERSION` (`AUTO`, `2`, `3`; default `AUTO`)
+| Option | Default | Effect |
+| --- | --- | --- |
+| `BINK2_BUILD_STATIC` | `ON` | Build `libbink2.a` |
+| `BINK2_BUILD_SHARED` | `ON` | Build the shared `libbink2` |
+| `BINK2_BUILD_ENCODER` | `ON` | Build the static encoder library `libbink2enc.a` |
+| `BINK2_BUILD_TOOLS` | `OFF` | Build `bink2_dump`, `bink2_build`, and the SDL player |
+| `BINK2_BUILD_TESTS` | `ON` | Build the test programs |
+| `BINK2_SDL_VERSION` | `AUTO` | SDL backend for the player: `AUTO`, `2`, or `3` |
+
+At least one of the static and shared libraries must be enabled.
+`bink2_build` also needs `BINK2_BUILD_ENCODER`. The player is built when an
+SDL3 or SDL2 CMake package is found and skipped otherwise.
 
 ## Usage
+
+Decode a file:
 
 ```c
 #include <bink2.h>
@@ -60,16 +63,43 @@ if (!b)
 
 bink2_enable_video(b, 1);
 bink2_enable_audio(b, 0, 1);
-bink2_first(b);
-/* bink2_get_plane(b, BINK2_PLANE_Y), bink2_get_video(b),
-   bink2_get_audio(b, 0), ... */
+
+char status = bink2_first(b);
+while (status == BINK2_MORE || status == BINK2_LAST) {
+    /* bink2_get_video(b)              packed RGB24
+       bink2_get_plane(b, BINK2_PLANE_Y) with bink2_get_stride()
+       bink2_get_audio(b, 0)           s16 PCM for this frame */
+    if (status == BINK2_LAST)
+        break;
+    status = bink2_next(b);
+}
 bink2_close(b);
 ```
+
+Encode a directory of images:
+
+```sh
+cmake -S . -B build -DBINK2_BUILD_TOOLS=ON && cmake --build build
+build/bink2_build frames/ -o clip.bk2 --fps 30 --quality 85 --verify
+```
+
+## Documentation
+
+| Page | Contents |
+| --- | --- |
+| [docs/api.md](docs/api.md) | Decoder and encoder API reference |
+| [docs/tools.md](docs/tools.md) | `bink2_build`, `bink2_dump`, `bink2_sdl_player` |
+| [docs/architecture.md](docs/architecture.md) | Source map and design decisions |
+| [docs/bink2.md](docs/bink2.md) | Container and bitstream notes |
+| [docs/encoder.md](docs/encoder.md) | Encoder internals and validation |
+| [tests/README.md](tests/README.md) | Reference checksums and the oracle |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, checks, and pull requests |
+| [AGENTS.md](AGENTS.md) | Instructions for coding agents |
 
 ## Tests
 
 Synthetic tests need no media. Reference and end-to-end tests read the two
-sample files from `BINK2_TEST_MEDIA`:
+sample files from `BINK2_TEST_MEDIA` and are skipped without it:
 
 ```sh
 BINK2_TEST_MEDIA="$HOME/Downloads" ctest --test-dir build --output-on-failure
@@ -80,3 +110,13 @@ Golden checksums are generated from the pinned FFmpeg Bink 2 oracle and the
 runs the pinned oracle over an encoded file and fails on any diagnostic;
 8-slice files exit 77 because the pinned oracle's 8-slice path is broken, and
 the library round trip covers them.
+
+## License
+
+`libbink2` is licensed under the GNU Lesser General Public License,
+version 2.1 or later. See `LICENSE`.
+
+The Bink 2 decoder is derived from the unmerged FFmpeg Bink 2 patches by
+Konstantin Shishkov and Paul B Mahol, which are LGPL-2.1-or-later. Bink Audio
+2 is derived from FFmpeg's `binkaudio.c` by Peter Ross and Daniel Verkamp.
+See `docs/bink2.md` and [CONTRIBUTORS.md](CONTRIBUTORS.md).
