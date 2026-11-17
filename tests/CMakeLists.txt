@@ -63,3 +63,13 @@ if(TARGET bink2_sdl_player)
     -P ${CMAKE_CURRENT_SOURCE_DIR}/run_sdl.cmake)
   set_tests_properties(sdl PROPERTIES SKIP_RETURN_CODE 77)
 endif()
+
+if(TARGET bink2_encoder)
+  add_executable(test_enc_bits test_enc_bits.c)
+  target_link_libraries(test_enc_bits PRIVATE bink2_encoder)
+  add_test(NAME enc_bits COMMAND test_enc_bits)
+
+  add_executable(test_enc_api test_enc_api.c)
+  target_link_libraries(test_enc_api PRIVATE bink2_encoder)
+  add_test(NAME enc_api COMMAND test_enc_api)
+endif()

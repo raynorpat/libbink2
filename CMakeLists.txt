@@ -9,7 +9,7 @@ endif()
 
 option(BINK2_BUILD_STATIC "Build the static libbink2 library" ON)
 option(BINK2_BUILD_SHARED "Build the shared libbink2 library" ON)
-option(BINK2_BUILD_ENCODER "Build the libbink2 encoder library" OFF)
+option(BINK2_BUILD_ENCODER "Build the libbink2 encoder library" ON)
 option(BINK2_BUILD_TOOLS "Build the example programs" OFF)
 option(BINK2_BUILD_TESTS "Build the test programs" ON)
 set(BINK2_SDL_VERSION "AUTO" CACHE STRING
@@ -116,7 +116,17 @@ if(BINK2_BUILD_TOOLS)
 endif()
 
 if(BINK2_BUILD_ENCODER)
-  message(STATUS "BINK2_BUILD_ENCODER is not implemented yet")
+  set(BINK2_ENCODER_SOURCES
+    src/encoder/bink2_encoder.c
+    src/encoder/bink2_enc_bits.c)
+  add_library(bink2_encoder STATIC ${BINK2_ENCODER_SOURCES})
+  bink2_set_compile_settings(bink2_encoder)
+  target_include_directories(bink2_encoder PUBLIC
+    $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/encoder>
+    $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+  target_link_libraries(bink2_encoder PUBLIC ${BINK2_LINK_TARGET})
+  set_target_properties(bink2_encoder PROPERTIES OUTPUT_NAME bink2enc)
+  add_library(Bink2::encoder ALIAS bink2_encoder)
 endif()
 
 if(BINK2_BUILD_TESTS)
@@ -137,6 +147,13 @@ if(BINK2_BUILD_SHARED)
 endif()
 
 install(FILES src/bink2.h DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+
+if(BINK2_BUILD_ENCODER)
+  install(TARGETS bink2_encoder
+    ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  install(FILES src/encoder/bink2_encoder.h
+    DESTINATION ${CMAKE_INSTALL_INCLUDEDIR})
+endif()
 
 if(BINK2_BUILD_TOOLS)
   install(TARGETS bink2_dump RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
