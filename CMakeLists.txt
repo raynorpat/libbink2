@@ -28,7 +28,10 @@ function(bink2_set_compile_settings target)
   endif()
 endfunction()
 
-set(BINK2_DECODER_SOURCES src/bink2.c src/bink2_bits.c src/bink2_dsp.c src/bink2_video.c src/bink2_video_old.c src/bink2_video_new.c src/bink2_audio.c)
+set(BINK2_DECODER_SOURCES
+  src/bink2.c src/bink2_bits.c src/bink2_dsp.c src/bink2_tables.c
+  src/bink2_video.c src/bink2_video_old.c src/bink2_video_new.c
+  src/bink2_audio.c)
 
 if(BINK2_BUILD_STATIC)
   add_library(bink2_static STATIC ${BINK2_DECODER_SOURCES})
@@ -118,7 +121,8 @@ endif()
 if(BINK2_BUILD_ENCODER)
   set(BINK2_ENCODER_SOURCES
     src/encoder/bink2_encoder.c
-    src/encoder/bink2_enc_bits.c)
+    src/encoder/bink2_enc_bits.c
+    src/encoder/bink2_enc_dct.c)
   add_library(bink2_encoder STATIC ${BINK2_ENCODER_SOURCES})
   bink2_set_compile_settings(bink2_encoder)
   target_include_directories(bink2_encoder PUBLIC

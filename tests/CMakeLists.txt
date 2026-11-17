@@ -69,6 +69,10 @@ if(TARGET bink2_encoder)
   target_link_libraries(test_enc_bits PRIVATE bink2_encoder)
   add_test(NAME enc_bits COMMAND test_enc_bits)
 
+  add_executable(test_enc_dct test_enc_dct.c)
+  target_link_libraries(test_enc_dct PRIVATE bink2_encoder)
+  add_test(NAME enc_dct COMMAND test_enc_dct)
+
   add_executable(test_enc_api test_enc_api.c)
   target_link_libraries(test_enc_api PRIVATE bink2_encoder)
   add_test(NAME enc_api COMMAND test_enc_api)

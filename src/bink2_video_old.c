@@ -1,3 +1,4 @@
+#include "bink2_tables.h"
 #include "bink2_video.h"
 #include "bink2_dsp.h"
 
@@ -11,26 +12,6 @@ static const uint16_t old_quant_codes[16] = {
 };
 static const uint8_t old_quant_bits[16] = {
     1, 2, 3, 4, 7, 7, 7, 7, 8, 8, 8, 8, 8, 8, 8, 8,
-};
-static const uint16_t old_ac_val_codes[2][13] = {
-    { 0x04, 0x01, 0x02, 0x00, 0x08, 0x18, 0xF8, 0x178, 0x138,
-      0x38, 0x1B8, 0x78, 0xB8 },
-    { 0x0A, 0x01, 0x04, 0x08, 0x06, 0x00, 0x02, 0x1A, 0x2A,
-      0x16A, 0x1EA, 0x6A, 0xEA },
-};
-static const uint8_t old_ac_val_bits[2][13] = {
-    { 3, 1, 2, 4, 5, 6, 8, 9, 9, 9, 9, 9, 9 },
-    { 6, 1, 3, 4, 3, 4, 4, 5, 7, 9, 9, 9, 9 },
-};
-static const uint16_t old_ac_skip_codes[2][NUM_AC_SKIPS] = {
-    { 0x00, 0x01, 0x0D, 0x15, 0x45, 0x85, 0xA5, 0x165,
-      0x65, 0x1E5, 0xE5, 0x25, 0x03, 0x05 },
-    { 0x00, 0x01, 0x03, 0x07, 0x1F, 0x1B, 0x0F, 0x2F,
-      0x5B, 0xDB, 0x1DB, 0x3B, 0x05, 0x0B },
-};
-static const uint8_t old_ac_skip_bits[2][NUM_AC_SKIPS] = {
-    { 1, 3, 4, 5, 7, 8, 8, 9, 9, 9, 9, 8, 2, 8 },
-    { 1, 3, 4, 4, 5, 7, 6, 6, 8, 9, 9, 6, 3, 5 },
 };
 static const uint8_t old_skips[] = {
     0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 62, 0, 0, 0,
@@ -503,15 +484,15 @@ static int old_decode_ac(Bink2Bits *bits, const uint8_t *scan,
         if (!(cbp & 1))
             continue;
         if (cbp & 0x10000) {
-            val_codes = old_ac_val_codes[1];
-            val_bits = old_ac_val_bits[1];
-            skip_codes = old_ac_skip_codes[1];
-            skip_bits = old_ac_skip_bits[1];
+            val_codes = bink2f_ac_val_codes[1];
+            val_bits = bink2f_ac_val_bits[1];
+            skip_codes = bink2f_ac_skip_codes[1];
+            skip_bits = bink2f_ac_skip_bits[1];
         } else {
-            val_codes = old_ac_val_codes[0];
-            val_bits = old_ac_val_bits[0];
-            skip_codes = old_ac_skip_codes[0];
-            skip_bits = old_ac_skip_bits[0];
+            val_codes = bink2f_ac_val_codes[0];
+            val_bits = bink2f_ac_val_bits[0];
+            skip_codes = bink2f_ac_skip_codes[0];
+            skip_bits = bink2f_ac_skip_bits[0];
         }
 
         while (idx < 64) {
