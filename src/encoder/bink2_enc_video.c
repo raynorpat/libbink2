@@ -590,8 +590,7 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
                 flags |= 0x40;
 
             v->old_mb_pos = mb;
-            bink2_me_search(src, ref, x, y, range, four_mv, mv, &nb);
-            if (mv[0].x == 0 && mv[0].y == 0) {
+            if (range == 0 || bink2_me_sad(src, ref, x, y, 0, 0) <= 32 * 32 * 4) {
                 type = 1;
                 bink2_write_btype(bw, lru, type);
                 update_inter_q(v, &v->new_q_cur[mb].inter_q, 0, flags);
@@ -600,11 +599,18 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
                 bink2_enc_count_block(type);
                 continue;
             }
+            bink2_me_search(src, ref, x, y, range, four_mv, mv, &nb);
 
-            bink2_enc_predict_mv(v, flags, raw, nb, predicted);
-            raw[0][0] = mv[0].x - predicted[0][0];
-            raw[0][1] = mv[0].y - predicted[0][1];
-            bink2_enc_predict_mv(v, flags, raw, nb, predicted);
+            {
+                int j;
+
+                for (j = 0; j < nb; j++) {
+                    bink2_enc_predict_mv(v, flags, raw, nb, predicted);
+                    raw[j][0] = mv[j].x - predicted[j][0];
+                    raw[j][1] = mv[j].y - predicted[j][1];
+                }
+                bink2_enc_predict_mv(v, flags, raw, nb, predicted);
+            }
             bink2_video_mc_luma(v, x, y);
             bink2_video_mc_chroma(v, x, y);
             sad = block_sad(src, v, x, y);
@@ -614,7 +620,10 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
                 type = 2;
                 bink2_write_btype(bw, lru, type);
                 update_inter_q(v, &v->new_q_cur[mb].inter_q, 0, flags);
-                bink2_write_mv1(bw, raw[0][0], raw[0][1]);
+                if (nb == 1)
+                    bink2_write_mv1(bw, raw[0][0], raw[0][1]);
+                else
+                    bink2_write_mv4(bw, raw);
             } else {
                 int predicted_q = predict_inter_q(v, flags);
                 int dq = q - predicted_q;
@@ -622,7 +631,10 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
                 type = 3;
                 bink2_write_btype(bw, lru, type);
                 update_inter_q(v, &v->new_q_cur[mb].inter_q, dq, flags);
-                bink2_write_mv1(bw, raw[0][0], raw[0][1]);
+                if (nb == 1)
+                    bink2_write_mv1(bw, raw[0][0], raw[0][1]);
+                else
+                    bink2_write_mv4(bw, raw);
                 bink2_write_quant(bw, predicted_q, q);
                 encode_residual_luma(bw, v, src, x, y, q, &prev_y);
                 bink2_bw_put(bw, 1, 1);
