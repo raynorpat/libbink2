@@ -32,7 +32,7 @@ build/bink2_build frames/ -o clip.bk2 --fps 30000/1001 --quality 85 --verify
 
 | Option | Default | Meaning |
 | --- | --- | --- |
-| `-o`, `--output FILE` | `<input>.bk2` | Output path. |
+| `-o`, `--output FILE` | see below | Output path. |
 | `--fps N[/D]` | `30` | Frame rate as an integer or a fraction. |
 | `--keyframe-interval N` | `150` | Frames between keyframes; `0` makes every frame a keyframe. |
 | `--motion-range N` | `8` | Motion search radius, 0..64. |
@@ -46,6 +46,11 @@ build/bink2_build frames/ -o clip.bk2 --fps 30000/1001 --quality 85 --verify
 | `--quiet` | | Cancel `--verbose`. |
 | `-h`, `--help` | | Print usage and exit 0. |
 | `--version` | | Print the version and exit 0. |
+
+Without `-o`, the output is written to the current directory and named after
+the last component of `<input>` with its extension replaced by `.bk2`:
+`shots/intro.png` and `shots/intro` both give `intro.bk2`. An input ending in
+a path separator, such as `frames/`, gives `out.bk2`.
 
 Exit codes match `bink2_enc_status`:
 

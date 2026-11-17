@@ -75,7 +75,8 @@ what is enabled, so enable what you need before `bink2_first()`.
 
 Open returns `NULL` when the file is not a `KB2f`..`KB2n` stream, when the
 header is implausible (zero or over 7680x4800 dimensions, zero or over
-1,000,000 frames, more than seven audio tracks), or when it is a `KB2g`+
+1,000,000 frames, a zero frame rate, more than seven audio tracks, an audio
+track with a zero sample rate), or when it is a `KB2g`+
 stream with alpha. `bink2_open_file()` prints one line to `stderr` for the
 alpha case; no other open failure prints anything.
 
