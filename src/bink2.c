@@ -1,4 +1,5 @@
 #include "bink2_internal.h"
+#include "bink2_audio.h"
 #include "bink2_video.h"
 
 #include <stdlib.h>
@@ -107,7 +108,13 @@ static int parse_container(bink2 b)
                            ((unsigned long)desc[2] << 16);
         b->audio[t].flags = desc[3];
         b->audio[t].channels = (desc[3] & 0x20) ? 2 : 1;
+        b->audio[t].bitdepth = 16;
         if (b->audio[t].rate == 0)
+            return -1;
+        if (bink2_audio_create(&b->audio[t].decoder, b->audio[t].rate,
+                               b->audio[t].channels,
+                               (desc[3] & 0x10) ? 1 : 0, 1,
+                               b->audio[t].max_decoded) != 0)
             return -1;
         off += 4;
     }
@@ -236,6 +243,12 @@ void bink2_close(bink2 object)
 {
     if (object == NULL)
         return;
+    {
+        int i;
+
+        for (i = 0; i < object->audio_tracks; i++)
+            bink2_audio_destroy(object->audio[i].decoder);
+    }
     free(object->frame_offsets);
     free(object->frame_sizes);
     free(object->frame_keyframes);
@@ -401,6 +414,14 @@ static int ensure_video(bink2 object)
     return 0;
 }
 
+static void reset_audio(bink2 object)
+{
+    int i;
+
+    for (i = 0; i < object->audio_tracks; i++)
+        bink2_audio_reset(object->audio[i].decoder);
+}
+
 static char decode_frame(bink2 object, unsigned long frame)
 {
     int status = bink2_internal_load_frame(object, frame);
@@ -415,6 +436,20 @@ static char decode_frame(bink2 object, unsigned long frame)
                                object->frame_keyframes[frame]) != 0)
             return BINK2_ERROR;
     }
+    {
+        int i;
+
+        for (i = 0; i < object->audio_tracks; i++) {
+            Bink2AudioTrack *track = &object->audio[i];
+
+            if (!track->enabled || track->decoder == NULL)
+                continue;
+            if (bink2_audio_decode(track->decoder, track->payload,
+                                   track->payload_size) != 0) {
+                /* Leave the other tracks and the picture running. */
+            }
+        }
+    }
     object->current_frame = frame;
     return frame + 1 < object->frame_count ? BINK2_MORE : BINK2_LAST;
 }
@@ -423,6 +458,7 @@ char bink2_first(bink2 object)
 {
     if (object == NULL || object->frame_count == 0)
         return BINK2_ERROR;
+    reset_audio(object);
     return decode_frame(object, 0);
 }
 
@@ -453,6 +489,7 @@ char bink2_seek_keyframe(bink2 object, unsigned long frame)
     target = frame;
     while (target > 0 && !object->frame_keyframes[target])
         target--;
+    reset_audio(object);
     return decode_frame(object, target);
 }
 
@@ -479,16 +516,18 @@ int bink2_get_stride(const bink2 object, int plane)
 
 const unsigned char *bink2_get_audio(const bink2 object, unsigned char track)
 {
-    (void)object;
-    (void)track;
-    return NULL;
+    if (object == NULL || track >= object->audio_tracks ||
+        !object->audio[track].enabled || object->audio[track].decoder == NULL)
+        return NULL;
+    return bink2_audio_pcm(object->audio[track].decoder);
 }
 
 unsigned long bink2_get_audio_size(const bink2 object, unsigned char track)
 {
-    (void)object;
-    (void)track;
-    return 0;
+    if (object == NULL || track >= object->audio_tracks ||
+        !object->audio[track].enabled || object->audio[track].decoder == NULL)
+        return 0;
+    return bink2_audio_pcm_bytes(object->audio[track].decoder);
 }
 
 int bink2_get_motion(const bink2 object, unsigned long *mb_w,

@@ -34,3 +34,12 @@ The script also builds the pinned independent encoder
 slices. The encoder is used only as a fixture generator; no source from it
 enters the library. Its frames extend `reference_checksums.h` with
 `bink2_kb2j_checksums`.
+
+## Audio validation
+
+The pinned oracle's Bink Audio 2 path drops many packets with
+"Incomplete packet", so its total PCM lengths are not a reliable golden.
+`test_audio` instead compares the **first clean block** of every track
+(1920 samples per channel) with a 4-LSB tolerance; the block bitstream and
+lengths are checked exactly. A Bink 2 audio chunk can contain several blocks,
+so the decoder loops until the chunk is exhausted.

@@ -29,3 +29,10 @@ target_compile_definitions(test_decode_g PRIVATE
   BINK2_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/media")
 add_test(NAME decode_g COMMAND test_decode_g)
 set_tests_properties(decode_g PROPERTIES SKIP_RETURN_CODE 77)
+
+add_executable(test_audio test_audio.c)
+target_link_libraries(test_audio PRIVATE ${BINK2_LINK_TARGET})
+target_compile_definitions(test_audio PRIVATE
+  BINK2_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/media")
+add_test(NAME audio COMMAND test_audio)
+set_tests_properties(audio PROPERTIES SKIP_RETURN_CODE 77)
