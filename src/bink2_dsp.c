@@ -232,7 +232,7 @@ void bink2_mc_luma(unsigned char *dst, int dst_stride,
     } else if (hmode == 0) {
         for (i = 0; i < 16; i++) {
             for (j = 0; j < 16; j++)
-                dst[j * dst_stride] =
+                dst[j * dst_stride + i] =
                     (unsigned char)clip8(LV_FILTER(msrc + j * ss + i, ss));
         }
     } else {
@@ -329,7 +329,7 @@ void bink2_mc_chroma(unsigned char *dst, int dst_stride,
     } else if (hmode == 0) {
         for (i = 0; i < 8; i++) {
             for (j = 0; j < 8; j++)
-                dst[j * dst_stride] =
+                dst[j * dst_stride + i] =
                     (unsigned char)clip8(chroma_v(vmode, msrc + j * ss + i,
                                                   ss));
         }

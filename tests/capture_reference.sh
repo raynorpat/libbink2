@@ -55,6 +55,7 @@ done
     echo 'typedef struct {'
     echo '    unsigned long frame;'
     echo '    uint64_t y, u, v, a;'
+    echo '    uint64_t y_sum, u_sum, v_sum;'
     echo '} Bink2FrameChecksum;'
     echo
     echo 'typedef struct {'

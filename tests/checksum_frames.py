@@ -27,13 +27,13 @@ def video_entries(path, width, height, frames, pix_fmt):
         raise SystemExit(f"{path}: need {frame_size * frames} bytes, have {len(data)}")
     for f in range(frames):
         off = f * frame_size
-        y = fnv(data[off:off + y_size]); off += y_size
-        u = fnv(data[off:off + c_size]); off += c_size
-        v = fnv(data[off:off + c_size]); off += c_size
+        ysum = sum(data[off:off + y_size]); y = fnv(data[off:off + y_size]); off += y_size
+        usum = sum(data[off:off + c_size]); u = fnv(data[off:off + c_size]); off += c_size
+        vsum = sum(data[off:off + c_size]); v = fnv(data[off:off + c_size]); off += c_size
         a = 0
         if a_size:
             a = fnv(data[off:off + a_size]); off += a_size
-        print(f"    {{ {f}, 0x{y:016x}ULL, 0x{u:016x}ULL, 0x{v:016x}ULL, 0x{a:016x}ULL }},")
+        print(f"    {{ {f}, 0x{y:016x}ULL, 0x{u:016x}ULL, 0x{v:016x}ULL, 0x{a:016x}ULL, {ysum}ULL, {usum}ULL, {vsum}ULL }},")
 
 
 def audio_entry(path, channels, prefix_samples, prefix_out):

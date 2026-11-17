@@ -428,11 +428,18 @@ char bink2_first(bink2 object)
 
 char bink2_next(bink2 object)
 {
+    unsigned long next;
+    char status;
+
     if (object == NULL)
         return BINK2_ERROR;
     if (object->current_frame + 1 >= object->frame_count)
         return BINK2_LAST;
-    return decode_frame(object, object->current_frame + 1);
+    next = object->current_frame + 1;
+    status = decode_frame(object, next);
+    if (status == BINK2_ERROR)
+        object->current_frame = next;
+    return status;
 }
 
 char bink2_seek_keyframe(bink2 object, unsigned long frame)

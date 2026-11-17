@@ -3,6 +3,10 @@ project(libbink2 VERSION 0.1.0 LANGUAGES C)
 
 include(GNUInstallDirs)
 
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+
 option(BINK2_BUILD_STATIC "Build the static libbink2 library" ON)
 option(BINK2_BUILD_SHARED "Build the shared libbink2 library" ON)
 option(BINK2_BUILD_ENCODER "Build the libbink2 encoder library" OFF)
@@ -20,7 +24,7 @@ function(bink2_set_compile_settings target)
   if(MSVC)
     target_compile_options(${target} PRIVATE /W3 /fp:precise)
   else()
-    target_compile_options(${target} PRIVATE -Wall -Wextra -ffp-contract=off)
+    target_compile_options(${target} PRIVATE -Wall -Wextra -fno-math-errno -fno-signed-zeros)
   endif()
 endfunction()
 

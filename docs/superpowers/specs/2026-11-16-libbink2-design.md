@@ -73,9 +73,13 @@ depend on `libbink`.
   is found.
 - I/O uses `fseek`/`long` like `libbink`, so the same 2 GB file ceiling
   applies on every platform.
-- Floating-point paths (the `KB2f` IDCT and Bink Audio 2) are compiled with
-  contraction disabled (`-ffp-contract=off`, `/fp:precise` on MSVC) and without
-  fast-math. The `KB2g+` integer path is exact on every platform.
+- Floating-point paths (the `KB2f` IDCT and Bink Audio 2) are compiled at the
+  same optimization level and with the same FP flags as the pinned oracle
+  (`-O3 -fno-math-errno -fno-signed-zeros`, default contraction on
+  clang/GCC; `/fp:precise` on MSVC) and without fast-math. The project
+  defaults to `Release`; at `-O0` the float IDCT rounds differently and the
+  golden frames diverge by ±1. The `KB2g+` integer path is exact on every
+  platform.
 - Golden checksums record the toolchain that produced them. Video and audio
   must match exactly on the primary macOS/clang build; on other 64-bit
   IEEE-754 builds the float paths are compared with a 1-LSB tolerance until
