@@ -1,0 +1,28 @@
+#ifndef LIBBINK2_ENC_MOTION_H
+#define LIBBINK2_ENC_MOTION_H
+
+#include "bink2_enc_internal.h"
+
+typedef struct {
+    int x, y;
+} Bink2Mv;
+
+void bink2_me_search(const Bink2Frame *src, const Bink2Frame *ref, int mbx,
+                     int mby, int range, int four_mv, Bink2Mv out[4],
+                     int *nb);
+int bink2_me_sad(const Bink2Frame *src, const Bink2Frame *ref, int mbx,
+                 int mby, int mvx, int mvy);
+
+typedef struct {
+    unsigned intra, skip, motion, residual;
+} Bink2EncStats;
+
+const Bink2EncStats *bink2_enc_last_stats(void);
+void bink2_enc_reset_stats(void);
+void bink2_enc_count_block(int type);
+
+/** Replicates the decoder's KB2g+ one-vector MV predictor. */
+void bink2_enc_predict_mv(Bink2Video *v, int flags, const int raw[4][2],
+                          int nb, int out[4][2]);
+
+#endif

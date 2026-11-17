@@ -1,6 +1,7 @@
 #include "bink2_encoder.h"
 #include "bink2_enc_container.h"
 #include "bink2_enc_internal.h"
+#include "bink2_enc_motion.h"
 #include "bink2_enc_video.h"
 #include "bink2_video.h"
 
@@ -174,20 +175,25 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
         goto done;
     }
 
+    bink2_enc_reset_stats();
     for (f = 0; f < source->frame_count; f++) {
         Bink2BitWriter bw;
         size_t bytes;
         long offset;
+        int is_key;
 
         if (bink2_enc_read_frame(source, f, &frame) != 0) {
             bink2_video_uninit(&state);
             bink2_frame_free(&frame);
             goto done;
         }
-        bink2_video_reset(&state);
+        bink2_enc_reset_frame(&state);
         bink2_bw_init(&bw);
-        if (bink2_enc_encode_intra_frame(&bw, &frame, &state, q, slices,
-                                         heights) != 0) {
+        is_key = options->keyframe_interval == 0 ||
+                 f % options->keyframe_interval == 0;
+        if (bink2_enc_encode_frame(&bw, &frame, &state, q, slices, heights,
+                                   is_key, (int)options->motion_range,
+                                   options->four_mv) != 0) {
             bink2_bw_free(&bw);
             bink2_video_uninit(&state);
             bink2_frame_free(&frame);
@@ -203,7 +209,7 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
             goto done;
         }
         offsets[f] = (unsigned long)offset;
-        keys[f] = 1;
+        keys[f] = (unsigned char)(is_key ? 1 : 0);
         if (bytes > largest)
             largest = (unsigned long)bytes;
         if (recon != NULL && write_recon(recon, &frame) != 0) {

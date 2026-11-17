@@ -1,6 +1,7 @@
 #include "bink2_enc_video.h"
 #include "bink2_dsp.h"
 #include "bink2_enc_dct.h"
+#include "bink2_enc_motion.h"
 #include "bink2_enc_syntax.h"
 #include "bink2_tables.h"
 
@@ -9,6 +10,7 @@
 #include <string.h>
 
 #define FRAME_FLAGS_INTRA 0x76018UL
+#define FRAME_FLAGS_INTER 0x6e018UL
 
 static int clip_int(int value, int low, int high)
 {
@@ -50,6 +52,23 @@ static void update_intra_q(Bink2Video *v, int8_t *q, int dq, int flags)
         *q = (int8_t)(mid_pred(v->new_q_prev[mb].intra_q,
                                v->new_q_cur[mb - 1].intra_q,
                                v->new_q_prev[mb - 1].intra_q) + dq);
+    }
+}
+
+static void update_inter_q(Bink2Video *v, int8_t *q, int dq, int flags)
+{
+    int mb = v->old_mb_pos;
+
+    if ((flags & 0x20) && (flags & 0x80)) {
+        *q = (int8_t)(16 + dq);
+    } else if (flags & 0x80) {
+        *q = (int8_t)(v->new_q_cur[mb - 1].inter_q + dq);
+    } else if (flags & 0x20) {
+        *q = (int8_t)(v->new_q_prev[mb].inter_q + dq);
+    } else {
+        *q = (int8_t)(mid_pred(v->new_q_prev[mb].inter_q,
+                               v->new_q_cur[mb - 1].inter_q,
+                               v->new_q_prev[mb - 1].inter_q) + dq);
     }
 }
 
@@ -346,23 +365,158 @@ static void copy_reconstruction(Bink2Frame *frame, const Bink2Video *v)
     }
 }
 
-int bink2_enc_encode_intra_frame(Bink2BitWriter *bw, Bink2Frame *frame,
-                                 Bink2Video *v, int q, int slices,
-                                 const int *heights)
+void bink2_enc_reset_frame(Bink2Video *v)
 {
-    unsigned long offsets[8] = { 0 };
+    int i;
+
+    for (i = 0; i < 4; i++) {
+        unsigned long h = (i == 1 || i == 2) ? v->aligned_h / 2
+                                             : v->aligned_h;
+
+        if (v->cur[i] != NULL)
+            memset(v->cur[i], 0, (size_t)v->stride[i] * h);
+    }
+    memset(v->new_q_cur, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
+    memset(v->new_q_prev, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
+    memset(v->old_mv_cur, 0, ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
+    memset(v->old_mv_prev, 0, ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
+    v->rgb_valid = 0;
+    v->old_mb_pos = 0;
+    v->old_comp = 0;
+}
+
+static void update_reference(Bink2Video *v)
+{
+    int i;
+
+    for (i = 0; i < 4; i++) {
+        unsigned long h = (i == 1 || i == 2) ? v->aligned_h / 2
+                                             : v->aligned_h;
+
+        if (v->cur[i] != NULL && v->ref[i] != NULL)
+            memcpy(v->ref[i], v->cur[i], (size_t)v->stride[i] * h);
+    }
+    v->has_prev = 1;
+}
+
+static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
+                              const Bink2Frame *src, const Bink2Frame *ref,
+                              int y0, int y1, int range, int four_mv)
+{
+    int y, x;
+
+    memset(v->new_q_prev, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
+    memset(v->old_mv_prev, 0,
+           ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
+
+    for (y = y0; y < y1; y += 32) {
+        uint8_t lru[4] = { 2, 3, 1, 0 };
+
+        memset(v->new_q_cur, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
+        memset(v->old_mv_cur, 0,
+               ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
+
+        for (x = 0; x < src->width; x += 32) {
+            int flags = 0;
+            int mb = x / 32;
+            Bink2Mv mv[4];
+            int nb = 1;
+            int type;
+
+            if (y == y0)
+                flags |= 0x80;
+            if (x == 0)
+                flags |= 0x20;
+            if (x == 32)
+                flags |= 0x200;
+            if (x + 32 >= src->width)
+                flags |= 0x40;
+
+            v->old_mb_pos = mb;
+            bink2_me_search(src, ref, x, y, range, four_mv, mv, &nb);
+            if (mv[0].x == 0 && mv[0].y == 0) {
+                type = 1;
+                bink2_write_btype(bw, lru, type);
+                update_inter_q(v, &v->new_q_cur[mb].inter_q, 0, flags);
+                update_intra_q(v, &v->new_q_cur[mb].intra_q, 0, flags);
+                bink2_video_copy_mb(v, x, y);
+                bink2_enc_count_block(type);
+                continue;
+            }
+
+            type = 2;
+            bink2_write_btype(bw, lru, type);
+            update_inter_q(v, &v->new_q_cur[mb].inter_q, 0, flags);
+            update_intra_q(v, &v->new_q_cur[mb].intra_q, 0, flags);
+            {
+                int raw[4][2] = { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
+                int predicted[4][2];
+
+                bink2_enc_predict_mv(v, flags, raw, nb, predicted);
+                raw[0][0] = mv[0].x - predicted[0][0];
+                raw[0][1] = mv[0].y - predicted[0][1];
+                bink2_write_mv1(bw, raw[0][0], raw[0][1]);
+                bink2_enc_predict_mv(v, flags, raw, nb, predicted);
+            }
+            bink2_video_mc_luma(v, x, y);
+            bink2_video_mc_chroma(v, x, y);
+            bink2_video_store_motion(v, x, y, nb);
+            bink2_enc_count_block(type);
+        }
+
+        {
+            Bink2OldDc *dc_swap = v->old_dc_cur;
+            Bink2Quant *q_swap = v->new_q_cur;
+            int32_t *mv_swap = v->old_mv_cur;
+
+            v->old_dc_cur = v->old_dc_prev;
+            v->old_dc_prev = dc_swap;
+            v->new_q_cur = v->new_q_prev;
+            v->new_q_prev = q_swap;
+            v->old_mv_cur = v->old_mv_prev;
+            v->old_mv_prev = mv_swap;
+        }
+    }
+    return 0;
+}
+
+static void frame_header(Bink2BitWriter *bw, int keyframe, int height,
+                         int slices)
+{
+    unsigned long flags = keyframe ? FRAME_FLAGS_INTRA : FRAME_FLAGS_INTER;
     int row_size;
     int s;
 
-    v->frame_flags = FRAME_FLAGS_INTRA;
-    bink2_bw_put(bw, FRAME_FLAGS_INTRA, 32);
+    bink2_bw_put(bw, flags, 32);
     for (s = 1; s < slices; s++)
-        bink2_bw_put(bw, 0, 32); /* slice offsets, patched below */
-
-    row_size = (int)((((frame->height + 15) & ~15UL) >> 3) - 1);
+        bink2_bw_put(bw, 0, 32);
+    if (!keyframe)
+        return;
+    row_size = (int)((((height + 15) & ~15UL) >> 3) - 1);
     bink2_bw_put(bw, 0, 1);
     put_ones(bw, row_size);
+}
 
+int bink2_enc_encode_frame(Bink2BitWriter *bw, Bink2Frame *frame,
+                           Bink2Video *v, int q, int slices,
+                           const int *heights, int keyframe, int range,
+                           int four_mv)
+{
+    unsigned long offsets[8] = { 0 };
+    Bink2Frame ref_view;
+    int s;
+
+    v->frame_flags = keyframe ? FRAME_FLAGS_INTRA : FRAME_FLAGS_INTER;
+    ref_view.y = v->ref[0];
+    ref_view.u = v->ref[1];
+    ref_view.v = v->ref[2];
+    ref_view.stride[0] = v->stride[0];
+    ref_view.stride[1] = v->stride[1];
+    ref_view.stride[2] = v->stride[2];
+    ref_view.width = frame->width;
+    ref_view.height = frame->height;
+
+    frame_header(bw, keyframe, frame->height, slices);
     for (s = 0; s < slices; s++) {
         int y0 = s == 0 ? 0 : heights[s - 1];
         int y1 = heights[s];
@@ -371,14 +525,25 @@ int bink2_enc_encode_intra_frame(Bink2BitWriter *bw, Bink2Frame *frame,
             bink2_bw_align32(bw);
             offsets[s] = bink2_bw_bitpos(bw) / 8;
         }
-        encode_slice(bw, v, frame, y0, y1, q);
+        if (keyframe)
+            encode_slice(bw, v, frame, y0, y1, q);
+        else
+            encode_inter_slice(bw, v, frame, &ref_view, y0, y1, range,
+                               four_mv);
     }
     bink2_bw_align32(bw);
-
     for (s = 1; s < slices; s++)
         put_le32(bw->data + 4 + 4 * (s - 1), offsets[s]);
     copy_reconstruction(frame, v);
+    update_reference(v);
     return 0;
+}
+
+int bink2_enc_encode_intra_frame(Bink2BitWriter *bw, Bink2Frame *frame,
+                                 Bink2Video *v, int q, int slices,
+                                 const int *heights)
+{
+    return bink2_enc_encode_frame(bw, frame, v, q, slices, heights, 1, 0, 0);
 }
 
 int bink2_frame_alloc(Bink2Frame *frame, int width, int height)
