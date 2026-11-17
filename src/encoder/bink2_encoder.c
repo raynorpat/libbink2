@@ -124,21 +124,30 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
     unsigned long end = 0;
     int heights[8] = { 0 };
     int slices;
-    int q;
     Bink2Frame frame;
     Bink2Video state;
     FILE *recon = NULL;
     unsigned long f;
+    unsigned char *previous = NULL;
+    int frame_q;
+    long target_bytes = 0;
     int rc = -1;
 
     if (source == NULL || options == NULL || file == NULL)
         return BINK2_ENC_ERR_USAGE;
     slices = (int)options->slices;
-    q = 8 + (100 - options->quality) / 5;
-    if (q < 8)
-        q = 8;
-    if (q > 36)
-        q = 36;
+    frame_q = 8 + (100 - options->quality) / 5;
+    if (frame_q < 1)
+        frame_q = 1;
+    if (frame_q > 36)
+        frame_q = 36;
+    if (options->target_bitrate > 0) {
+        frame_q = 12;
+        target_bytes = (long)((options->target_bitrate * source->fps_den) /
+                              (source->fps_num * 8));
+        if (target_bytes < 1)
+            target_bytes = 1;
+    }
 
     if (bink2_container_write_header(file, (unsigned long)source->width,
                                      (unsigned long)source->height,
@@ -160,6 +169,12 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
         goto done;
     if (bink2_frame_alloc(&frame, source->width, source->height) != 0)
         goto done;
+    previous = (unsigned char *)calloc(1, (size_t)source->width *
+                                       (size_t)source->height);
+    if (previous == NULL) {
+        bink2_frame_free(&frame);
+        goto done;
+    }
     memset(&state, 0, sizeof(state));
     if (bink2_video_init(&state, (unsigned long)source->width,
                          (unsigned long)source->height,
@@ -181,18 +196,36 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
         size_t bytes;
         long offset;
         int is_key;
+        int scene_cut = 0;
 
         if (bink2_enc_read_frame(source, f, &frame) != 0) {
             bink2_video_uninit(&state);
             bink2_frame_free(&frame);
             goto done;
         }
+        if (f > 0) {
+            unsigned long sum = 0;
+            unsigned long i;
+            unsigned long count = (unsigned long)source->width *
+                                  (unsigned long)source->height;
+
+            for (i = 0; i < count; i++)
+                sum += (unsigned long)abs((int)frame.y[i] -
+                                          (int)previous[i]);
+            if (sum > count * 24)
+                scene_cut = 1;
+        }
+        memcpy(previous, frame.y,
+               (size_t)source->width * (size_t)source->height);
+
         bink2_enc_reset_frame(&state);
         bink2_bw_init(&bw);
-        is_key = options->keyframe_interval == 0 ||
-                 f % options->keyframe_interval == 0;
-        if (bink2_enc_encode_frame(&bw, &frame, &state, q, slices, heights,
-                                   is_key, (int)options->motion_range,
+        is_key = options->keyframe_interval == 0 || f == 0 ||
+                 (options->keyframe_interval > 0 &&
+                  f % options->keyframe_interval == 0) || scene_cut;
+        if (bink2_enc_encode_frame(&bw, &frame, &state, frame_q, slices,
+                                   heights, is_key,
+                                   (int)options->motion_range,
                                    options->four_mv) != 0) {
             bink2_bw_free(&bw);
             bink2_video_uninit(&state);
@@ -212,6 +245,24 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
         keys[f] = (unsigned char)(is_key ? 1 : 0);
         if (bytes > largest)
             largest = (unsigned long)bytes;
+        if (target_bytes > 0) {
+            if ((long)bytes > target_bytes * 3 / 2)
+                frame_q += 3;
+            else if ((long)bytes > target_bytes * 5 / 4)
+                frame_q += 2;
+            else if ((long)bytes > target_bytes)
+                frame_q += 1;
+            else if ((long)bytes < target_bytes * 2 / 3)
+                frame_q -= 3;
+            else if ((long)bytes < target_bytes * 4 / 5)
+                frame_q -= 2;
+            else if ((long)bytes < target_bytes)
+                frame_q -= 1;
+            if (frame_q < 1)
+                frame_q = 1;
+            if (frame_q > 36)
+                frame_q = 36;
+        }
         if (recon != NULL && write_recon(recon, &frame) != 0) {
             bink2_bw_free(&bw);
             bink2_video_uninit(&state);
@@ -236,7 +287,7 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
         goto done;
     }
     if (quality != NULL)
-        *quality = (short)q;
+        *quality = (short)frame_q;
     bink2_video_uninit(&state);
     bink2_frame_free(&frame);
     rc = 0;
@@ -244,6 +295,7 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
 done:
     if (recon != NULL)
         fclose(recon);
+    free(previous);
     free(offsets);
     free(keys);
     if (rc != 0)

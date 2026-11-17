@@ -80,6 +80,14 @@ static int predict_intra_q(Bink2Video *v, int flags)
     return predicted;
 }
 
+static int predict_inter_q(Bink2Video *v, int flags)
+{
+    int8_t predicted;
+
+    update_inter_q(v, &predicted, 0, flags);
+    return predicted;
+}
+
 static int quantise_dc(int desired, int prediction, int q)
 {
     int pat = bink2g_dc_pat[q < 8 ? 8 : q];
@@ -96,6 +104,29 @@ static int quantise_dc(int desired, int prediction, int q)
     if (value >= 0)
         return (int)((value + 0x200) >> 10);
     return -(int)(((-value) + 0x200) >> 10);
+}
+
+static void encode_dc_block(Bink2Video *v, int is_luma, int comp, int count,
+                            int mindc, int maxdc, int flags,
+                            const int32_t desired[16], int q, int32_t tdc[16],
+                            int dc_actual[16])
+{
+    float tdcf[16] = { 0 };
+    int mb = v->old_mb_pos;
+    int i;
+
+    v->old_comp = comp;
+    for (i = 0; i < count; i++) {
+        int prediction;
+
+        bink2_video_predict_dc(v, is_luma, mindc, maxdc, flags, tdcf);
+        prediction = (int)lround(v->old_dc_cur[mb].dc[comp][i]);
+        tdc[i] = quantise_dc(desired[i], prediction, q);
+        tdcf[i] = (float)tdc[i];
+    }
+    bink2_video_predict_dc(v, is_luma, mindc, maxdc, flags, tdcf);
+    for (i = 0; i < count; i++)
+        dc_actual[i] = (int)lround(v->old_dc_cur[mb].dc[comp][i]);
 }
 
 static void fdct_from_plane(const unsigned char *plane, int stride, int width,
@@ -170,11 +201,9 @@ static int encode_luma(Bink2BitWriter *bw, Bink2Video *v,
 {
     float coeff[64];
     int32_t levels[16][64];
-    int dc_coeff[16];
+    int32_t desired[16];
     int32_t tdc[16];
     int dc_actual[16];
-    float tdcf[16];
-    float zeros[16] = { 0 };
     int mb = x / 32;
     int idx;
 
@@ -185,26 +214,15 @@ static int encode_luma(Bink2BitWriter *bw, Bink2Video *v,
 
         fdct_from_plane(src->y, src->stride[0], src->width, src->height,
                         x + bx, y + by, coeff);
-        dc_coeff[idx] = (int)lround(coeff[0]);
+        desired[idx] = clip_int((int)lround((coeff[0] - 32) / 8.0), 0, 2047);
         coeff[0] = 0.0f;
         bink2_quantise(coeff, bink2g_luma_intra_qmat, q, 0, levels[idx]);
         clamp_levels(levels[idx]);
     }
 
     v->old_mb_pos = mb;
-    v->old_comp = 0;
-    bink2_video_predict_dc(v, 1, 0, 2047, flags, zeros);
-    for (idx = 0; idx < 16; idx++) {
-        int prediction = (int)lround(v->old_dc_cur[mb].dc[0][idx]);
-        int desired = (int)lround((dc_coeff[idx] - 32) / 8.0);
-
-        desired = clip_int(desired, 0, 2047);
-        tdc[idx] = quantise_dc(desired, prediction, q);
-        tdcf[idx] = (float)tdc[idx];
-    }
-    bink2_video_predict_dc(v, 1, 0, 2047, flags, tdcf);
-    for (idx = 0; idx < 16; idx++)
-        dc_actual[idx] = (int)lround(v->old_dc_cur[mb].dc[0][idx]);
+    encode_dc_block(v, 1, 0, 16, 0, 2047, flags, desired, q, tdc,
+                    dc_actual);
 
     bink2_write_cbp_luma(bw, *prev_cbp,
                          (uint32_t)(v->frame_flags & 0x40000), 0xFFFF);
@@ -239,11 +257,9 @@ static int encode_chroma(Bink2BitWriter *bw, Bink2Video *v,
     int mb = x / 32;
     float coeff[64];
     int32_t levels[4][64];
-    int dc_coeff[4];
+    int32_t desired[16] = { 0 };
     int32_t tdc[4];
     int dc_actual[4];
-    float tdcf[4];
-    float zeros[4] = { 0 };
     int idx;
 
     for (idx = 0; idx < 4; idx++) {
@@ -251,26 +267,15 @@ static int encode_chroma(Bink2BitWriter *bw, Bink2Video *v,
         int by = (idx >> 1) * 8;
 
         fdct_from_plane(sp, sstride, cw, ch, cx + bx, cy + by, coeff);
-        dc_coeff[idx] = (int)lround(coeff[0]);
+        desired[idx] = clip_int((int)lround((coeff[0] - 32) / 8.0), 0, 2047);
         coeff[0] = 0.0f;
         bink2_quantise(coeff, bink2g_chroma_intra_qmat, q, 0, levels[idx]);
         clamp_levels(levels[idx]);
     }
 
     v->old_mb_pos = mb;
-    v->old_comp = comp;
-    bink2_video_predict_dc(v, 0, 0, 2047, flags, zeros);
-    for (idx = 0; idx < 4; idx++) {
-        int prediction = (int)lround(v->old_dc_cur[mb].dc[comp][idx]);
-        int desired = (int)lround((dc_coeff[idx] - 32) / 8.0);
-
-        desired = clip_int(desired, 0, 2047);
-        tdc[idx] = quantise_dc(desired, prediction, q);
-        tdcf[idx] = (float)tdc[idx];
-    }
-    bink2_video_predict_dc(v, 0, 0, 2047, flags, tdcf);
-    for (idx = 0; idx < 4; idx++)
-        dc_actual[idx] = (int)lround(v->old_dc_cur[mb].dc[comp][idx]);
+    encode_dc_block(v, 0, comp, 4, 0, 2047, flags, desired, q, tdc,
+                    dc_actual);
 
     bink2_write_cbp_chroma(bw, *prev_cbp, 0xF);
     *prev_cbp = 0xF;
@@ -399,9 +404,157 @@ static void update_reference(Bink2Video *v)
     v->has_prev = 1;
 }
 
+static int block_sad(const Bink2Frame *src, const Bink2Video *v, int x,
+                     int y)
+{
+    int sad = 0;
+    int bx, by;
+
+    for (by = 0; by < 32 && y + by < src->height; by++)
+        for (bx = 0; bx < 32 && x + bx < src->width; bx++)
+            sad += abs((int)src->y[(size_t)(y + by) * src->stride[0] + x +
+                                   bx] -
+                       (int)v->cur[0][(size_t)(y + by) * v->stride[0] + x +
+                                      bx]);
+    return sad;
+}
+
+static void residual_coeffs(const Bink2Frame *src, const Bink2Video *v,
+                            int plane, int x, int y, float coeff[64])
+{
+    float predicted[64];
+    const unsigned char *sp;
+    int stride, w, h;
+    int i;
+
+    if (plane == 0) {
+        sp = src->y;
+        stride = src->stride[0];
+        w = src->width;
+        h = src->height;
+    } else if (plane == 1) {
+        sp = src->u;
+        stride = src->stride[1];
+        w = (src->width + 1) / 2;
+        h = (src->height + 1) / 2;
+    } else {
+        sp = src->v;
+        stride = src->stride[2];
+        w = (src->width + 1) / 2;
+        h = (src->height + 1) / 2;
+    }
+    fdct_from_plane(sp, stride, w, h, x, y, coeff);
+    fdct_from_plane(v->cur[plane], v->stride[plane], v->plane_w[plane],
+                    v->plane_h[plane], x, y, predicted);
+    for (i = 0; i < 64; i++)
+        coeff[i] -= predicted[i];
+}
+
+static int encode_residual_luma(Bink2BitWriter *bw, Bink2Video *v,
+                                const Bink2Frame *src, int x, int y, int q,
+                                uint32_t *prev_cbp)
+{
+    float coeff[64];
+    int32_t levels[16][64];
+    int32_t desired[16];
+    int32_t tdc[16];
+    int dc_actual[16];
+    int mb = x / 32;
+    int idx;
+
+    for (idx = 0; idx < 16; idx++) {
+        int pos = bink2_luma_repos[idx];
+        int bx = (pos & 3) * 8;
+        int by = (pos >> 2) * 8;
+
+        residual_coeffs(src, v, 0, x + bx, y + by, coeff);
+        desired[idx] = clip_int((int)lround((coeff[0] - 32) / 8.0), -1023,
+                                1023);
+        coeff[0] = 0.0f;
+        bink2_quantise(coeff, bink2g_inter_qmat, q, 0, levels[idx]);
+        clamp_levels(levels[idx]);
+    }
+
+    v->old_mb_pos = mb;
+    encode_dc_block(v, 1, 0, 16, -1023, 1023, 0xA8, desired, q, tdc,
+                    dc_actual);
+
+    bink2_write_cbp_luma(bw, *prev_cbp,
+                         (uint32_t)(v->frame_flags & 0x40000), 0xFFFF);
+    *prev_cbp = 0xFFFF;
+    bink2_write_dcs(bw, tdc, 16, q);
+    for (idx = 0; idx < 16; idx++)
+        bink2_write_acs(bw, levels[idx], bink2g_inter_qmat, q, 1);
+
+    for (idx = 0; idx < 16; idx++) {
+        int pos = bink2_luma_repos[idx];
+        int bx = (pos & 3) * 8;
+        int by = (pos >> 2) * 8;
+        int32_t block[64];
+
+        bink2_dequantise(levels[idx], bink2g_inter_qmat, q, block);
+        block[0] = dc_actual[idx] * 8 + 32;
+        bink2_idct_new(block);
+        bink2_add_block(v->cur[0] + (size_t)(y + by) * v->stride[0] + x +
+                        bx, v->stride[0], block);
+    }
+    return 0;
+}
+
+static int encode_residual_chroma(Bink2BitWriter *bw, Bink2Video *v,
+                                  const Bink2Frame *src, int plane, int comp,
+                                  int x, int y, int q, uint32_t *prev_cbp)
+{
+    int cx = x / 2;
+    int cy = y / 2;
+    int mb = x / 32;
+    float coeff[64];
+    int32_t levels[4][64];
+    int32_t desired[16] = { 0 };
+    int32_t tdc[4];
+    int dc_actual[4];
+    int idx;
+
+    for (idx = 0; idx < 4; idx++) {
+        int bx = (idx & 1) * 8;
+        int by = (idx >> 1) * 8;
+
+        residual_coeffs(src, v, plane, cx + bx, cy + by, coeff);
+        desired[idx] = clip_int((int)lround((coeff[0] - 32) / 8.0), -1023,
+                                1023);
+        coeff[0] = 0.0f;
+        bink2_quantise(coeff, bink2g_inter_qmat, q, 0, levels[idx]);
+        clamp_levels(levels[idx]);
+    }
+
+    v->old_mb_pos = mb;
+    encode_dc_block(v, 0, comp, 4, -1023, 1023, 0xA8, desired, q, tdc,
+                    dc_actual);
+
+    bink2_write_cbp_chroma(bw, *prev_cbp, 0xF);
+    *prev_cbp = 0xF;
+    bink2_write_dcs(bw, tdc, 4, q);
+    for (idx = 0; idx < 4; idx++)
+        bink2_write_acs(bw, levels[idx], bink2g_inter_qmat, q, 1);
+
+    for (idx = 0; idx < 4; idx++) {
+        int bx = (idx & 1) * 8;
+        int by = (idx >> 1) * 8;
+        int32_t block[64];
+
+        bink2_dequantise(levels[idx], bink2g_inter_qmat, q, block);
+        block[0] = dc_actual[idx] * 8 + 32;
+        bink2_idct_new(block);
+        bink2_add_block(v->cur[plane] + (size_t)(cy + by) * v->stride[plane] +
+                        cx + bx, v->stride[plane], block);
+    }
+    return 0;
+}
+
 static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
                               const Bink2Frame *src, const Bink2Frame *ref,
-                              int y0, int y1, int range, int four_mv)
+                              int y0, int y1, int range, int four_mv,
+                              int q)
 {
     int y, x;
 
@@ -411,6 +564,7 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
 
     for (y = y0; y < y1; y += 32) {
         uint8_t lru[4] = { 2, 3, 1, 0 };
+        uint32_t prev_y = 0, prev_u = 0, prev_v = 0;
 
         memset(v->new_q_cur, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
         memset(v->old_mv_cur, 0,
@@ -422,6 +576,9 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
             Bink2Mv mv[4];
             int nb = 1;
             int type;
+            int raw[4][2] = { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
+            int predicted[4][2];
+            int sad;
 
             if (y == y0)
                 flags |= 0x80;
@@ -444,22 +601,36 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
                 continue;
             }
 
-            type = 2;
-            bink2_write_btype(bw, lru, type);
-            update_inter_q(v, &v->new_q_cur[mb].inter_q, 0, flags);
-            update_intra_q(v, &v->new_q_cur[mb].intra_q, 0, flags);
-            {
-                int raw[4][2] = { { 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 } };
-                int predicted[4][2];
-
-                bink2_enc_predict_mv(v, flags, raw, nb, predicted);
-                raw[0][0] = mv[0].x - predicted[0][0];
-                raw[0][1] = mv[0].y - predicted[0][1];
-                bink2_write_mv1(bw, raw[0][0], raw[0][1]);
-                bink2_enc_predict_mv(v, flags, raw, nb, predicted);
-            }
+            bink2_enc_predict_mv(v, flags, raw, nb, predicted);
+            raw[0][0] = mv[0].x - predicted[0][0];
+            raw[0][1] = mv[0].y - predicted[0][1];
+            bink2_enc_predict_mv(v, flags, raw, nb, predicted);
             bink2_video_mc_luma(v, x, y);
             bink2_video_mc_chroma(v, x, y);
+            sad = block_sad(src, v, x, y);
+            update_intra_q(v, &v->new_q_cur[mb].intra_q, 0, flags);
+
+            if (sad <= 32 * 32 * 2) {
+                type = 2;
+                bink2_write_btype(bw, lru, type);
+                update_inter_q(v, &v->new_q_cur[mb].inter_q, 0, flags);
+                bink2_write_mv1(bw, raw[0][0], raw[0][1]);
+            } else {
+                int predicted_q = predict_inter_q(v, flags);
+                int dq = q - predicted_q;
+
+                type = 3;
+                bink2_write_btype(bw, lru, type);
+                update_inter_q(v, &v->new_q_cur[mb].inter_q, dq, flags);
+                bink2_write_mv1(bw, raw[0][0], raw[0][1]);
+                bink2_write_quant(bw, predicted_q, q);
+                encode_residual_luma(bw, v, src, x, y, q, &prev_y);
+                bink2_bw_put(bw, 1, 1);
+                encode_residual_chroma(bw, v, src, 2, 1, x, y, q,
+                                       &prev_v);
+                encode_residual_chroma(bw, v, src, 1, 2, x, y, q,
+                                       &prev_u);
+            }
             bink2_video_store_motion(v, x, y, nb);
             bink2_enc_count_block(type);
         }
@@ -529,7 +700,7 @@ int bink2_enc_encode_frame(Bink2BitWriter *bw, Bink2Frame *frame,
             encode_slice(bw, v, frame, y0, y1, q);
         else
             encode_inter_slice(bw, v, frame, &ref_view, y0, y1, range,
-                               four_mv);
+                               four_mv, q);
     }
     bink2_bw_align32(bw);
     for (s = 1; s < slices; s++)

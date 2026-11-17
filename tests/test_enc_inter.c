@@ -114,6 +114,7 @@ int main(void)
     stats = bink2_enc_last_stats();
     CHECK(stats->skip > 0);
     CHECK(stats->motion > 0);
+    CHECK(stats->residual > 0);
 
     file = fopen("test_enc_inter.bk2", "rb");
     CHECK(file != NULL);
