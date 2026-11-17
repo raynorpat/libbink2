@@ -70,7 +70,7 @@ what is enabled, so enable what you need before `bink2_first()`.
 | --- | --- |
 | `bink2_open_file(filename, mode)` | Opens and owns the file. `mode` exists for libbink API compatibility; `BINK2_MODE_MEMORY` currently behaves like `BINK2_MODE_DISK`. |
 | `bink2_open_filepointer(file, mode)` | Reads from a stream you opened in binary mode. The stream is **not** closed by `bink2_close()`; close it yourself afterwards. |
-| `bink2_open_memory(buffer, size)` | Decodes from a buffer. |
+| `bink2_open_memory(buffer, size)` | Decodes from a buffer. The buffer is not copied; keep it alive and unchanged until `bink2_close()`. |
 | `bink2_close(object)` | Frees everything. `NULL` is accepted. |
 
 Open returns `NULL` when the file is not a `KB2f`..`KB2n` stream, when the
