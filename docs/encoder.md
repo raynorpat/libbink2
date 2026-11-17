@@ -1,0 +1,104 @@
+# libbink2 encoder
+
+`libbink2` encodes `KB2j` video: 8-bit YUV 4:2:0, no alpha, no audio. The
+encoder is a separate static library (`libbink2enc.a`, CMake target
+`bink2_encoder`) and is also exposed by the `bink2_build` command.
+
+## Containers and frames
+
+The writer produces the `KB2j` container with the same 48-byte header and
+`(frame_count + 1)` word index as the decoder consumes. The index key bit and
+the frame flags are set together:
+
+- keyframe (intra) frames use video flags `0x76018` and write the row-CBP
+  block;
+- inter frames use `0x6e018` and omit that block.
+
+The container video-flags low bits select the slice count: `0x10` = 2,
+`0x11` = 3, `0x12` = 4, `0x13` = 8. Slice boundaries are computed exactly as
+the decoder does for `KB2h+`:
+
+```
+aligned_h = (height + 31) & ~31
+end = aligned_h + 32 * slices - 1
+start += ((end - start) / (slices - i)) & ~31
+end -= 32
+```
+
+Each slice starts on a 32-bit boundary; the header stores the byte offsets of
+slices 1..n-1.
+
+## Macroblocks
+
+A frame is a sequence of 32x32 luma macroblocks. Intra frames write the
+quantiser delta, luma CBP/DC/AC, chroma V, then chroma U. Inter frames write
+the LRU block type (intra / skip / motion / residual), then:
+
+- **skip** copies the macroblock from the reference and writes no MV;
+- **motion** writes one or four vectors and motion-compensates without a
+  residual;
+- **residual** writes the vectors, the quantiser delta, then the
+  motion-compensated residual CBP/DC/AC and the chroma-present bit.
+
+The DC predictor is the decoder's 2-D predictor. The encoder inverts it
+element by element: for each DC in turn it predicts with the already-chosen
+values, then writes the difference. This matters because the predictor chains
+`dc[i] = dc[i-1] + tdc[i]`; replacing it with a single zero-delta prediction
+does not reconstruct the block.
+
+The forward transform is the exact inverse of the integer IDCT's 8x8 matrix,
+not a textbook cosine DCT (the decoder butterfly's basis is
+`[1.1875, 1, 0.6875, 0.25, ...]`). Quantisation and dequantisation use the
+decoder's matrices and rounding, so the reconstruction written by the encoder
+and by the decoder are byte-identical.
+
+## Options
+
+| Option | Meaning |
+| --- | --- |
+| `slices` | 2, 3, 4 or 8 |
+| `keyframe_interval` | frames between keyframes; `0` = all intra |
+| `motion_range` | luma search radius, 0..64; `0` forces skip copies |
+| `four_mv` | one or four vectors per macroblock |
+| `quality` | 0..100 in quality mode |
+| `target_bitrate` | bits per second; `0` selects quality mode |
+| `verify` | decode the result after writing |
+| `recon_path` | tight raw YUV 4:2:0 reconstruction dump |
+| `verbose` | progress on stderr |
+
+`bink2_build` maps the same options to command-line flags and reads `.ppm`,
+`.bmp`, `.png`, `.jpg`, and `.jpeg` frames from a directory (natural sort) or
+a single image.
+
+## Rate control
+
+Quality mode maps quality to a base quantiser (`q = 8 + (100-quality)/5`,
+clamped 1..36). Target-bitrate mode starts at `q = 12` and adjusts it by 1..3
+per frame toward `target_bitrate * fps_den / (fps_num * 8)` bytes. A frame
+whose mean luma SAD against the previous source frame exceeds 24 is marked a
+scene cut and coded as a keyframe, with the index bit and frame flags kept in
+sync.
+
+## Reconstruction guarantee
+
+For every encoded frame the encoder reconstructs with the same dequantise,
+integer IDCT, put/add, and motion-compensation functions the decoder uses.
+`recon_path` therefore matches the decoder's visible planes exactly; the tests
+compare every frame byte for byte. Motion search, mode decisions, and rate
+control may be lossy, but they never make the decoder disagree with the
+reconstruction.
+
+## Known divergence
+
+The decoder does not implement Bink 2's in-loop deblocking filter, matching the
+pinned FFmpeg reference. Decoded output therefore differs from RAD's decoder by
+a few levels around block edges. The encoder's `KB2j` subset and its
+reconstruction are independent of that post-filter.
+
+## Validation
+
+`tools/validate.sh file.bk2` runs the pinned FFmpeg Bink 2 oracle with
+`-v error` and fails on any diagnostic. Set `FFMPEG_BINK2` to point at a
+different build. Set `BINK2ENC_BIN` and `BINK2_VALIDATE_YUV` (plus optional
+`BINK2_VALIDATE_WIDTH/HEIGHT/FPS`) to also encode the same raw clip with the
+independent `bink2enc` and print both file sizes.

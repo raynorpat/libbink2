@@ -15,7 +15,7 @@ The decoder and tools are implemented:
 - `bink2_dump`, `bink2_build` (images to `.bk2`), and an SDL player.
 
 The encoder writes `KB2j` from RGB images (PPM, BMP, PNG, JPEG) or a YUV
-source and supports quality and target-bitrate modes. The in-loop deblocking
+source and supports quality and target-bitrate modes; see `docs/encoder.md`. The in-loop deblocking
 filter is not implemented on decode, matching the pinned FFmpeg reference;
 decoded output differs from RAD's decoder by a few levels around block edges.
 
@@ -76,4 +76,5 @@ BINK2_TEST_MEDIA="$HOME/Downloads" ctest --test-dir build --output-on-failure
 ```
 
 Golden checksums are generated from the pinned FFmpeg Bink 2 oracle and the
-`bink2enc`-generated `KB2j` fixture; see `tests/README.md`.
+`bink2enc`-generated `KB2j` fixture; see `tests/README.md`. `tools/validate.sh`
+runs the pinned oracle over an encoded file and fails on any diagnostic.
