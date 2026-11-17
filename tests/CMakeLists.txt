@@ -50,3 +50,10 @@ if(TARGET bink2_dump)
     -P ${CMAKE_CURRENT_SOURCE_DIR}/run_dump.cmake)
   set_tests_properties(dump PROPERTIES SKIP_RETURN_CODE 77)
 endif()
+
+if(TARGET bink2_sdl_player)
+  add_test(NAME sdl COMMAND ${CMAKE_COMMAND}
+    -DPLAYER_EXE=$<TARGET_FILE:bink2_sdl_player>
+    -P ${CMAKE_CURRENT_SOURCE_DIR}/run_sdl.cmake)
+  set_tests_properties(sdl PROPERTIES SKIP_RETURN_CODE 77)
+endif()
