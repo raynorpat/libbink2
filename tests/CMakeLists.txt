@@ -69,6 +69,12 @@ if(TARGET bink2_encoder)
   target_link_libraries(test_enc_bits PRIVATE bink2_encoder)
   add_test(NAME enc_bits COMMAND test_enc_bits)
 
+  add_executable(test_enc_image test_enc_image.c)
+  target_link_libraries(test_enc_image PRIVATE bink2_encoder)
+  target_compile_definitions(test_enc_image PRIVATE
+    BINK2_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/media")
+  add_test(NAME enc_image COMMAND test_enc_image)
+
   add_executable(test_enc_options test_enc_options.c)
   target_link_libraries(test_enc_options PRIVATE bink2_encoder)
   add_test(NAME enc_options COMMAND test_enc_options)
@@ -96,4 +102,14 @@ if(TARGET bink2_encoder)
   add_executable(test_enc_api test_enc_api.c)
   target_link_libraries(test_enc_api PRIVATE bink2_encoder)
   add_test(NAME enc_api COMMAND test_enc_api)
+endif()
+
+if(TARGET bink2_build)
+  add_test(NAME build_help COMMAND bink2_build --help)
+
+  add_executable(test_build_e2e test_build_e2e.c)
+  target_link_libraries(test_build_e2e PRIVATE bink2_encoder)
+  target_compile_definitions(test_build_e2e PRIVATE
+    BINK2_BUILD_EXE="$<TARGET_FILE:bink2_build>")
+  add_test(NAME build_e2e COMMAND test_build_e2e)
 endif()

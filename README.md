@@ -12,12 +12,12 @@ The decoder and tools are implemented:
   syntax is ported; decoding them half-written would corrupt every plane.
 - Bink Audio 2, up to seven tracks.
 - Keyframe seeking and a 2 GB file ceiling.
-- `bink2_dump`, `bink2_build` (on the encoder plan), and an SDL player.
+- `bink2_dump`, `bink2_build` (images to `.bk2`), and an SDL player.
 
-The encoder is being added by the separate encoder plan. The in-loop
-deblocking filter is not implemented, matching the pinned FFmpeg reference;
-decoded output differs from RAD's decoder by a few levels around block
-edges.
+The encoder writes `KB2j` from RGB images (PPM, BMP, PNG, JPEG) or a YUV
+source and supports quality and target-bitrate modes. The in-loop deblocking
+filter is not implemented on decode, matching the pinned FFmpeg reference;
+decoded output differs from RAD's decoder by a few levels around block edges.
 
 ## License
 

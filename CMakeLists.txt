@@ -126,15 +126,26 @@ if(BINK2_BUILD_ENCODER)
     src/encoder/bink2_enc_syntax.c
     src/encoder/bink2_enc_container.c
     src/encoder/bink2_enc_video.c
-    src/encoder/bink2_enc_motion.c)
+    src/encoder/bink2_enc_motion.c
+    src/encoder/bink2_enc_image.c
+    src/encoder/bink2_enc_stb.c)
   add_library(bink2_encoder STATIC ${BINK2_ENCODER_SOURCES})
   bink2_set_compile_settings(bink2_encoder)
   target_include_directories(bink2_encoder PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src/encoder>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
+  target_include_directories(bink2_encoder PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/third_party/stb)
   target_link_libraries(bink2_encoder PUBLIC ${BINK2_LINK_TARGET})
   set_target_properties(bink2_encoder PROPERTIES OUTPUT_NAME bink2enc)
   add_library(Bink2::encoder ALIAS bink2_encoder)
+endif()
+
+if(BINK2_BUILD_TOOLS AND TARGET bink2_encoder)
+  add_executable(bink2_build src/tools/bink2_build.c)
+  bink2_set_compile_settings(bink2_build)
+  target_link_libraries(bink2_build PRIVATE bink2_encoder)
+  install(TARGETS bink2_build RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR})
 endif()
 
 if(BINK2_BUILD_TESTS)
