@@ -294,8 +294,28 @@ static int encode_chroma(Bink2BitWriter *bw, Bink2Video *v,
     return 0;
 }
 
+static void count_block(Bink2EncStats *stats, int type)
+{
+    if (stats == NULL)
+        return;
+    switch (type) {
+    case 0:
+        stats->intra++;
+        break;
+    case 1:
+        stats->skip++;
+        break;
+    case 2:
+        stats->motion++;
+        break;
+    default:
+        stats->residual++;
+        break;
+    }
+}
+
 static int encode_slice(Bink2BitWriter *bw, Bink2Video *v, Bink2Frame *src,
-                        int y0, int y1, int q)
+                        int y0, int y1, int q, Bink2EncStats *stats)
 {
     int y, x;
 
@@ -334,7 +354,7 @@ static int encode_slice(Bink2BitWriter *bw, Bink2Video *v, Bink2Frame *src,
             encode_luma(bw, v, src, x, y, flags, q, &prev_y);
             encode_chroma(bw, v, src, 2, 1, x, y, flags, q, &prev_v);
             encode_chroma(bw, v, src, 1, 2, x, y, flags, q, &prev_u);
-            bink2_enc_count_block(0);
+            count_block(stats, 0);
         }
 
         {
@@ -555,7 +575,7 @@ static int encode_residual_chroma(Bink2BitWriter *bw, Bink2Video *v,
 static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
                               const Bink2Frame *src, const Bink2Frame *ref,
                               int y0, int y1, int range, int four_mv,
-                              int q)
+                              int q, Bink2EncStats *stats)
 {
     int y, x;
 
@@ -602,7 +622,7 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
                 update_inter_q(v, &v->new_q_cur[mb].inter_q, 0, flags);
                 update_intra_q(v, &v->new_q_cur[mb].intra_q, 0, flags);
                 bink2_video_copy_mb(v, x, y);
-                bink2_enc_count_block(type);
+                count_block(stats, type);
                 continue;
                 }
             }
@@ -647,7 +667,7 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
                 }
             }
             bink2_video_store_motion(v, x, y, nb);
-            bink2_enc_count_block(type);
+            count_block(stats, type);
         }
 
         {
@@ -686,7 +706,7 @@ static void frame_header(Bink2BitWriter *bw, int keyframe, int height,
 int bink2_enc_encode_frame(Bink2BitWriter *bw, Bink2Frame *frame,
                            Bink2Video *v, int q, int slices,
                            const int *heights, int keyframe, int range,
-                           int four_mv)
+                           int four_mv, Bink2EncStats *stats)
 {
     unsigned long offsets[8] = { 0 };
     Bink2Frame ref_view;
@@ -712,10 +732,10 @@ int bink2_enc_encode_frame(Bink2BitWriter *bw, Bink2Frame *frame,
             offsets[s] = bink2_bw_bitpos(bw) / 8;
         }
         if (keyframe)
-            encode_slice(bw, v, frame, y0, y1, q);
+            encode_slice(bw, v, frame, y0, y1, q, stats);
         else
             encode_inter_slice(bw, v, frame, &ref_view, y0, y1, range,
-                               four_mv, q);
+                               four_mv, q, stats);
     }
     bink2_bw_align32(bw);
     for (s = 1; s < slices; s++)
@@ -729,7 +749,8 @@ int bink2_enc_encode_intra_frame(Bink2BitWriter *bw, Bink2Frame *frame,
                                  Bink2Video *v, int q, int slices,
                                  const int *heights)
 {
-    return bink2_enc_encode_frame(bw, frame, v, q, slices, heights, 1, 0, 0);
+    return bink2_enc_encode_frame(bw, frame, v, q, slices, heights, 1, 0, 0,
+                                  NULL);
 }
 
 int bink2_frame_alloc(Bink2Frame *frame, int width, int height)

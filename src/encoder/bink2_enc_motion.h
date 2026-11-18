@@ -13,14 +13,6 @@ void bink2_me_search(const Bink2Frame *src, const Bink2Frame *ref, int mbx,
 int bink2_me_sad(const Bink2Frame *src, const Bink2Frame *ref, int mbx,
                  int mby, int mvx, int mvy);
 
-typedef struct {
-    unsigned intra, skip, motion, residual;
-} Bink2EncStats;
-
-const Bink2EncStats *bink2_enc_last_stats(void);
-void bink2_enc_reset_stats(void);
-void bink2_enc_count_block(int type);
-
 /** Replicates the decoder's KB2g+ MV predictor (one or four vectors). */
 void bink2_enc_predict_mv(Bink2Video *v, int flags, const int raw[4][2],
                           int nb, int out[4][2]);

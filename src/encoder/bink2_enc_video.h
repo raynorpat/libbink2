@@ -15,7 +15,7 @@ int bink2_enc_encode_intra_frame(Bink2BitWriter *bw, Bink2Frame *frame,
 int bink2_enc_encode_frame(Bink2BitWriter *bw, Bink2Frame *frame,
                            Bink2Video *state, int q, int slices,
                            const int *heights, int keyframe, int range,
-                           int four_mv);
+                           int four_mv, Bink2EncStats *stats);
 void bink2_enc_reset_frame(Bink2Video *state);
 
 #endif

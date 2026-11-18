@@ -1,6 +1,6 @@
 #include "bink2.h"
 #include "bink2_encoder.h"
-#include "bink2_enc_motion.h"
+#include "bink2_enc_internal.h"
 
 #include "test_common.h"
 
@@ -105,13 +105,17 @@ static int compare_file(const char *path, const char *recon_path, int width,
     return 0;
 }
 
+/* Block counts from the last encode_clip call. */
+static Bink2EncStats clip_stats;
+
 static int encode_clip(const char *path, const char *recon_path, Ctx *ctx,
                        unsigned long frames, unsigned slices, int four_mv,
                        unsigned key_interval, unsigned motion_range)
 {
     bink2_enc_source src;
     bink2_enc_options options;
-    char err[256];
+    FILE *file;
+    int status;
 
     memset(&src, 0, sizeof(src));
     src.width = ctx->width;
@@ -127,7 +131,13 @@ static int encode_clip(const char *path, const char *recon_path, Ctx *ctx,
     options.keyframe_interval = key_interval;
     options.motion_range = motion_range;
     options.recon_path = recon_path;
-    return bink2_enc_encode(&src, &options, path, err, sizeof(err));
+    file = fopen(path, "wb+");
+    if (file == NULL)
+        return BINK2_ENC_ERR_ENCODE;
+    status = bink2_enc_encode_intra(&src, &options, file, NULL, &clip_stats);
+    if (fclose(file) != 0 && status == BINK2_ENC_OK)
+        status = BINK2_ENC_ERR_ENCODE;
+    return status;
 }
 
 int main(void)
@@ -193,8 +203,7 @@ int main(void)
         snprintf(recon, sizeof(recon), "test_opt_tiny_%d.yuv", s);
         CHECK(encode_clip(path, recon, &ctx, 3, 2, 1, 150, 2) ==
               BINK2_ENC_OK);
-        CHECK(bink2_enc_last_stats()->motion +
-              bink2_enc_last_stats()->residual > 0);
+        CHECK(clip_stats.motion + clip_stats.residual > 0);
         CHECK(compare_file(path, recon, ctx.width, ctx.height, 3, 0) == 0);
         remove(path);
         remove(recon);

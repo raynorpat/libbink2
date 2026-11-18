@@ -16,12 +16,18 @@ typedef struct {
     int height;
 } Bink2Frame;
 
+/** Macroblock counts by coding type, for tests. */
+typedef struct {
+    unsigned intra, skip, motion, residual;
+} Bink2EncStats;
+
 int bink2_frame_alloc(Bink2Frame *frame, int width, int height);
 void bink2_frame_free(Bink2Frame *frame);
 int bink2_enc_read_frame(const bink2_enc_source *source, unsigned long index,
                          Bink2Frame *frame);
+/* `stats`, when non-NULL, is zeroed and receives this encode's counts. */
 int bink2_enc_encode_intra(const bink2_enc_source *source,
                            const bink2_enc_options *options, FILE *file,
-                           short *quality);
+                           short *quality, Bink2EncStats *stats);
 
 #endif

@@ -22,6 +22,12 @@ An installed tree provides `bink2.h`, `bink2_encoder.h`, `libbink2` and
 `libbink2enc.a`. No CMake package config or pkg-config file is installed, so
 link installed libraries by name (`-lbink2enc -lbink2 -lm`).
 
+## Threads
+
+Neither library keeps mutable global state. Separate decoder handles, and
+separate `bink2_enc_encode()` calls, can run on different threads at the same
+time. One handle must not be used from two threads at once.
+
 ## Decoder (`bink2.h`)
 
 ### Decode loop

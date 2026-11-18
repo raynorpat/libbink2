@@ -205,7 +205,7 @@ static int verify_written(FILE *file, FILE *recon, int width, int height,
 
 int bink2_enc_encode_intra(const bink2_enc_source *source,
                            const bink2_enc_options *options, FILE *file,
-                           short *quality)
+                           short *quality, Bink2EncStats *stats)
 {
     unsigned long *offsets = NULL;
     unsigned char *keys = NULL;
@@ -323,7 +323,8 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
         goto done;
     }
 
-    bink2_enc_reset_stats();
+    if (stats != NULL)
+        memset(stats, 0, sizeof(*stats));
     for (f = 0; f < source->frame_count; f++) {
         Bink2BitWriter bw;
         size_t bytes;
@@ -360,7 +361,7 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
         if (bink2_enc_encode_frame(&bw, &frame, &state, frame_q, slices,
                                    heights, is_key,
                                    (int)options->motion_range,
-                                   options->four_mv) != 0) {
+                                   options->four_mv, stats) != 0) {
             bink2_bw_free(&bw);
             bink2_video_uninit(&state);
             bink2_frame_free(&frame);
@@ -530,7 +531,7 @@ bink2_enc_status bink2_enc_encode(const bink2_enc_source *source,
         set_error(err, errlen, "cannot create the output file");
         return BINK2_ENC_ERR_ENCODE;
     }
-    rc = bink2_enc_encode_intra(source, options, file, &q);
+    rc = bink2_enc_encode_intra(source, options, file, &q, NULL);
     if (fclose(file) != 0 && rc == BINK2_ENC_OK)
         rc = BINK2_ENC_ERR_ENCODE;
     if (rc == BINK2_ENC_ERR_VERIFY) {

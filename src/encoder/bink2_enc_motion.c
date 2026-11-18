@@ -4,39 +4,6 @@
 #include <limits.h>
 #include <stdlib.h>
 
-static Bink2EncStats last_stats;
-
-const Bink2EncStats *bink2_enc_last_stats(void)
-{
-    return &last_stats;
-}
-
-void bink2_enc_reset_stats(void)
-{
-    last_stats.intra = 0;
-    last_stats.skip = 0;
-    last_stats.motion = 0;
-    last_stats.residual = 0;
-}
-
-void bink2_enc_count_block(int type)
-{
-    switch (type) {
-    case 0:
-        last_stats.intra++;
-        break;
-    case 1:
-        last_stats.skip++;
-        break;
-    case 2:
-        last_stats.motion++;
-        break;
-    default:
-        last_stats.residual++;
-        break;
-    }
-}
-
 #define MV(arr, mb, k, c) ((arr)[(mb) * 8 + (k) * 2 + (c)])
 
 static int mid_pred(int a, int b, int c)

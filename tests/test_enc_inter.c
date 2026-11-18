@@ -1,5 +1,6 @@
 #include "bink2.h"
 #include "bink2_encoder.h"
+#include "bink2_enc_internal.h"
 #include "bink2_enc_motion.h"
 
 #include "test_common.h"
@@ -113,7 +114,7 @@ int main(void)
     size_t y_size = (size_t)TEST_WIDTH * TEST_HEIGHT;
     size_t c_size = (size_t)cw * ch;
     unsigned char *ref = (unsigned char *)malloc(y_size + c_size * 2);
-    const Bink2EncStats *stats;
+    Bink2EncStats stats;
     FILE *file;
     bink2 b;
 
@@ -131,12 +132,15 @@ int main(void)
     options.keyframe_interval = 150;
     options.recon_path = "test_enc_inter_recon.yuv";
 
-    CHECK(bink2_enc_encode(&src, &options, "test_enc_inter.bk2", err,
-                           sizeof(err)) == BINK2_ENC_OK);
-    stats = bink2_enc_last_stats();
-    CHECK(stats->skip > 0);
-    CHECK(stats->motion > 0);
-    CHECK(stats->residual > 0);
+    /* The internal entry point reports the block counts. */
+    file = fopen("test_enc_inter.bk2", "wb+");
+    CHECK(file != NULL);
+    CHECK(bink2_enc_encode_intra(&src, &options, file, NULL, &stats) ==
+          BINK2_ENC_OK);
+    CHECK(fclose(file) == 0);
+    CHECK(stats.skip > 0);
+    CHECK(stats.motion > 0);
+    CHECK(stats.residual > 0);
 
     file = fopen("test_enc_inter.bk2", "rb");
     CHECK(file != NULL);
