@@ -215,6 +215,7 @@ if(BINK2_BUILD_ENCODER)
     src/encoder/bink2_enc_container.c
     src/encoder/bink2_enc_video.c
     src/encoder/bink2_enc_motion.c
+    src/encoder/bink2_enc_wav.c
     src/encoder/bink2_enc_image.c
     src/encoder/bink2_enc_stb.c)
   add_library(bink2_encoder STATIC ${BINK2_ENCODER_SOURCES})

@@ -78,6 +78,10 @@ if(TARGET bink2_encoder)
   target_link_libraries(test_enc_bits PRIVATE bink2_encoder)
   add_test(NAME enc_bits COMMAND test_enc_bits)
 
+  add_executable(test_enc_wav test_enc_wav.c)
+  target_link_libraries(test_enc_wav PRIVATE bink2_encoder)
+  add_test(NAME enc_wav COMMAND test_enc_wav)
+
   add_executable(test_enc_image test_enc_image.c)
   target_link_libraries(test_enc_image PRIVATE bink2_encoder)
   target_compile_definitions(test_enc_image PRIVATE
