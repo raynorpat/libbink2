@@ -24,6 +24,11 @@ ctest --test-dir build --output-on-failure -R '^enc_inter$'
 # include the tests that need the sample files
 BINK2_TEST_MEDIA=<dir-with-samples> ctest --test-dir build --output-on-failure
 
+# compare encoded audio with the pinned oracle (built by
+# tests/capture_reference.sh)
+BINK2_ORACLE="$PWD/build/oracle/FFmpeg-bink2/ffmpeg" \
+  ctest --test-dir build --output-on-failure -R '^enc_audio_oracle$'
+
 # sanitizer build; use it for any change to parsing or decoding
 cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DBINK2_BUILD_TOOLS=ON \
   -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
@@ -31,11 +36,18 @@ cmake --build build-asan
 ctest --test-dir build-asan --output-on-failure
 ```
 
-A clean run is 27 tests with `BINK2_BUILD_TOOLS=ON` on macOS (the GL, Metal,
-and Vulkan player smoke tests skip when `SDL_VIDEODRIVER=dummy` cannot create a
-context; Windows adds the D3D9/D3D11 tests). Without `BINK2_TEST_MEDIA`, the
-reference tests and player tests report `Skipped` (exit code 77). A skip is
-not a pass: say so when reporting results.
+With `BINK2_BUILD_TOOLS=ON` on macOS, with SDL and Vulkan found, CTest
+registers 32 tests. A player whose dependency is missing has no test, and
+Windows adds the D3D9/D3D11 tests. Tests that cannot run report `Skipped`
+(exit code 77):
+
+- `decode_f`, `decode_g`, `audio`, and the player tests skip without
+  `BINK2_TEST_MEDIA`;
+- the GL, Metal, and Vulkan player tests also skip when
+  `SDL_VIDEODRIVER=dummy` cannot create a context;
+- `enc_audio_oracle` skips without `BINK2_ORACLE`.
+
+A skip is not a pass: name the skipped tests when reporting results.
 
 The sample files are `sc13_01_partial.bk2` and `ge_video_86l.bk2`. They are
 not in the repository and cannot be redistributed. If you do not have them,
@@ -48,11 +60,11 @@ run the synthetic tests and state that the reference tests were skipped.
 | `src/bink2.h` | Public decoder API |
 | `src/encoder/bink2_encoder.h` | Public encoder API |
 | `src/` | Decoder and codec code shared with the encoder |
-| `src/encoder/` | Encoder |
-| `src/tools/` | `bink2_build`, `bink2_dump`, `bink2_sdl_player` |
+| `src/encoder/` | Encoder; `bink2_enc_audio.c` and `bink2_enc_wav.c` are the audio track and WAV loader |
+| `src/tools/` | `bink2_build`, `bink2_dump`, `bink2_sdl_player`; `player/` holds the renderer players |
 | `tests/` | One `test_*.c` program per CTest test; `test_common.h` has `CHECK` and the hash helpers |
 | `tests/reference_checksums.h` | Generated golden values; do not hand-edit |
-| `docs/` | [Index](docs/README.md), [architecture](docs/architecture.md), [API](docs/api.md), [tools](docs/tools.md), [format](docs/bink2.md), [encoder](docs/encoder.md) |
+| `docs/` | [Index](docs/README.md), [architecture](docs/architecture.md), [API](docs/api.md), [tools](docs/tools.md), [format](docs/bink2.md), [encoder](docs/encoder.md), [audio encoder](docs/audio-encoder-design.md) |
 
 Read [docs/architecture.md](docs/architecture.md) before changing library
 code. `docs/superpowers/` is historical planning material; do not treat it as

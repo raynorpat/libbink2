@@ -1,19 +1,22 @@
 # Audio encoder design
 
-Status: proposed, awaiting approval.
+How the encoder writes its Bink Audio 2 track: the format facts it must match,
+the container layout, quality control, and the limits. For the API fields see
+[api.md](api.md#encoder-bink2_encoderh); for the `--audio` flags see
+[tools.md](tools.md#bink2_build).
 
 ## Goal
 
-Encode one PCM WAV soundtrack into a `KB2j` file alongside the existing video.
-The result must open and play with this decoder, the pinned FFmpeg Bink 2
-oracle, and the bundled players.
+Encode one PCM soundtrack into a `KB2j` file alongside the video. The result
+must open and play with this decoder, the pinned FFmpeg Bink 2 oracle, and the
+bundled players.
 
 Audio is lossy, so it is validated with signal-to-noise ratio and a reference
 decoder, never by byte comparison.
 
 ## Scope
 
-In scope:
+Supported:
 
 - One audio track, mono or 2-channel.
 - Bink Audio 2 with the DCT transform (`use_dct=1`, `version_2=1`).
@@ -22,7 +25,7 @@ In scope:
 - One simple quality control, no bitrate targeting.
 - Container track metadata and per-frame audio chunks.
 
-Out of scope for this change:
+Not supported:
 
 - Multiple tracks, RDFT blocks, 32-bit float WAV, ADPCM, resampling.
 - Audio bitrate targeting, joint stereo, psychoacoustic masking beyond the
@@ -160,69 +163,23 @@ accepts rates 1..65535 and rejects anything higher.
 
 ## Public API
 
-One public-header change, to `src/encoder/bink2_encoder.h`:
+Audio is configured through `source.audio` (`rate`, `channels`,
+`sample_count`), the `read_audio` callback, and `options.audio_quality`; see
+[api.md](api.md#source). `read_audio` must be repeatable because `verify`
+reads the source again after encoding. The encoder pads past the end of the
+source itself, so the callback only sees indices below `sample_count`.
 
-```c
-typedef struct {
-    unsigned long rate;          /* Hz */
-    int channels;                /* 1 or 2; 0 disables audio */
-    unsigned long sample_count;  /* samples per channel */
-} bink2_enc_audio;
-
-typedef struct {
-    int width;
-    int height;
-    unsigned long frame_count;
-    unsigned long fps_num;
-    unsigned long fps_den;
-    bink2_enc_audio audio;
-    int (*read_frame)(void *user, unsigned long frame, unsigned char *dst);
-    int (*read_frame_yuv)(void *user, unsigned long frame, unsigned char *y,
-                          unsigned char *u, unsigned char *v);
-    int (*read_audio)(void *user, unsigned long start_sample,
-                      unsigned long sample_count, short *dst);
-    void *user;
-} bink2_enc_source;
-
-typedef struct {
-    unsigned keyframe_interval;
-    unsigned motion_range;
-    unsigned slices;
-    int four_mv;
-    int quality;
-    unsigned target_bitrate;
-    int audio_quality;           /* 0..100, default 80 */
-    int verify;
-    const char *recon_path;
-    int verbose;
-} bink2_enc_options;
-```
-
-`read_audio` fills `sample_count * channels` interleaved host-endian signed
-16-bit samples beginning at `start_sample` and returns 0 on success. It must be
-repeatable: `verify` reads the source again after encoding. A short final block
-is padded with silence by the encoder, so the callback only ever sees indices
-below `sample_count`.
-
-`channels == 0` keeps the current video-only behaviour. Any other value
-requires `read_audio` and a valid rate.
+`channels == 0` keeps video-only behaviour. Any other value requires
+`read_audio` and a valid rate, or the encode fails with
+`BINK2_ENC_ERR_USAGE`.
 
 ## CLI
 
-```
-bink2_build frames/ -o clip.bk2 --audio soundtrack.wav --audio-quality 80
-```
-
-- `--audio FILE` loads a PCM RIFF WAV. Mono or stereo; 8, 16, or 24-bit.
-- `--audio-quality N` is 0..100, default 80. It applies only when `--audio` is
-  present.
-- The WAV is truncated or padded to the video duration. No resampling: the
-  container stores the WAV rate.
-- Reject float/ADPCM WAV, more than two channels, zero rate, and rates above
-  65535.
-
-The WAV loader follows `bink2_enc_image.c`: a small `bink2_enc_wav.c/.h` in the
-encoder library, with no dependency and no public header.
+`bink2_build --audio FILE --audio-quality N` loads a PCM RIFF WAV with
+`bink2_enc_wav.c` and passes it through `read_audio`. The loader is an
+encoder-side helper with no public header. Float and ADPCM WAV, more than two
+channels, a zero rate, and rates above 65535 are rejected. See
+[tools.md](tools.md#bink2_build).
 
 ## Quality control
 
@@ -242,66 +199,40 @@ implies.
 
 If the loudest coefficient still needs more than 15 bits at index 95, the
 encoder clamps the magnitude to 32767. This only affects extreme full-scale
-high-frequency content and is logged in `--verbose`.
+high-frequency content.
 
-The first implementation will record measured SNR and size at several quality
-values in the test comments; the tests then pin a floor rather than a guessed
-number.
+`test_enc_audio` pins SNR floors and size ordering across quality values
+rather than exact sizes.
 
 ## Modules
 
-| File | Change |
+| File | Responsibility |
 | --- | --- |
-| `src/encoder/bink2_enc_audio.c/.h` | New: scheduler, forward DCT, block writer, chunk assembly. |
-| `src/encoder/bink2_enc_wav.c/.h` | New: PCM WAV loader to interleaved s16. |
-| `src/encoder/bink2_enc_container.c/.h` | Header track metadata, zero-chunk support. |
-| `src/encoder/bink2_encoder.c` | Validate audio source, open/close audio state, write chunks before video, extend verify. |
-| `src/encoder/bink2_encoder.h` | The public API above. |
-| `src/encoder/bink2_enc_internal.h` | Declare the audio source helper if needed. |
-| `src/tools/bink2_build.c` | `--audio`, `--audio-quality`, WAV loading, source callback. |
-| `CMakeLists.txt` | Add both encoder sources. |
-| `tests/CMakeLists.txt` | New test targets. |
+| `src/encoder/bink2_enc_audio.c/.h` | Scheduler, forward DCT, block writer, chunk assembly. |
+| `src/encoder/bink2_enc_wav.c/.h` | PCM WAV loader to interleaved s16. |
+| `src/encoder/bink2_enc_container.c/.h` | Track metadata in the header, zero-length chunks. |
+| `src/encoder/bink2_encoder.c` | Audio source validation, chunks written before video, audio checks in `verify`. |
+| `src/tools/bink2_build.c` | `--audio`, `--audio-quality`, WAV loading, the source callback. |
 
-Verification: `bink2_enc_encode_intra` currently decodes the file and compares
-video frames. With audio it additionally enables track 0, requires every frame
-to decode, and requires the accumulated PCM to cover the video duration. It
-does not require audio to match the source, because the transform is lossy.
+With audio, `verify` enables track 0, requires every frame to decode, and
+requires the decoded PCM byte count to equal the encoder's total. It does not
+compare samples with the source, because the transform is lossy.
 
 ## Tests
 
-1. `test_enc_wav` (unit): 8/16/24-bit mono and stereo, odd chunk padding,
-   unknown chunks, truncated data, non-PCM tags, and unsupported channel
-   counts. No sample files.
-2. `test_enc_dct` (existing file or a new unit): forward DCT followed by the
-   decoder's transform reproduces the input block within float tolerance;
-   covers frame lengths 512, 1024, and 2048.
-3. `test_enc_audio`: for each rate class, encode a synthetic block, decode it
-   with `bink2_audio_decode`, and check the reported decoded size, sample
-   count, and SNR after skipping the startup overlap. Includes an all-zero
-   block, a DC-only block, and a full-scale sine.
-4. `test_enc_syntax` addition: write one multi-block chunk, parse it with the
-   decoder's bit reader using the documented grammar, and assert the reader
-   ends exactly at the chunk's byte length. This is the writer/reader
-   bit-position rule.
-5. `test_enc_api`: a video plus audio source encodes, reopens with
-   `bink2_info_audio`, reports one track with the WAV rate and channel count,
-   decodes every frame, and returns non-silent PCM. Also covers a source with
-   `channels == 0` unchanged, and invalid audio metadata rejected as usage.
-6. `test_enc_rate` addition: default quality, lower quality, and all-silence
-   produce non-increasing sizes, and quality 0 still decodes.
-7. `test_malformed` additions: an audio chunk larger than the frame, a
-   truncated decoded-size prefix, a track descriptor with a zero rate, and a
-   chunk whose reported size exceeds `max_decoded`. Run under ASan/UBSan.
-8. `build_e2e`: `bink2_build --audio` on generated frames and a generated WAV,
-   then open the result and verify track metadata and decoded audio.
-9. `test_enc_audio_oracle` (optional, skips with 77 when `BINK2_ORACLE` is
-   unset): encode a short clip with audio, decode it with this library, decode
-   it with the pinned FFmpeg Bink 2 build, and compare the two PCM streams.
-   The two transforms round some samples differently, so the test allows at
-   most a one-LSB difference and reports the SNR against the source. This does
-   not modify `reference_checksums.h`.
+No sample files are needed, no reference checksum depends on the audio
+encoder, and no binary audio fixture is committed.
 
-No reference checksum is regenerated, and no binary audio fixture is added.
+| Test | Covers |
+| --- | --- |
+| `enc_wav` | 8/16/24-bit mono and stereo WAV, odd chunk padding, unknown chunks, truncated data, non-PCM tags, unsupported channel counts. |
+| `enc_audio` | Decoder round trip and SNR per rate class; silence, DC, full-scale high-frequency content; quality ordering; scheduling and video-duration truncation; writer and reader ending at the same bit position. |
+| `enc_container_audio` | Header track descriptor, stereo and mono flags, the no-track case. |
+| `enc_audio_file` | Whole-file encodes with audio, short-source padding, packet sizes, a corrupted reported-size field. |
+| `enc_api` | Audio field and `audio_quality` validation, and a failing `read_audio` callback. |
+| `malformed` | Oversized and truncated audio chunks, a reported size above `max_decoded`, a zero-rate track descriptor. |
+| `build_e2e` | `bink2_build --audio` end to end. |
+| `enc_audio_oracle` | Library and pinned-oracle decodes agree within one LSB. Skips (77) without `BINK2_ORACLE`; see [tests/README.md](../tests/README.md#encoded-audio-oracle). |
 
 ## Risks and limits
 
@@ -309,8 +240,8 @@ No reference checksum is regenerated, and no binary audio fixture is added.
   representable coefficient magnitude. Full-scale high-frequency content can
   clip. The test suite includes a full-scale sine to make this visible.
 - **Quality tuning.** The target-steps formula and the 12-entry mask floor are
-  starting points. They will be adjusted against measured SNR and bitrate, and
-  the final numbers recorded in the tests.
+  heuristics, not a psychoacoustic model. Changing them changes every encoded
+  file; the SNR floors in `test_enc_audio` are the check.
 - **Startup transient.** The first block fades in from silence. This matches
   the format's overlap behaviour; seeking already resets overlap.
 - **16-bit rate ceiling.** The oracle's demuxer reads a 16-bit rate. The
@@ -318,24 +249,3 @@ No reference checksum is regenerated, and no binary audio fixture is added.
   misparses.
 - **Lossy output.** There is no bit-exact audio guarantee, and none is
   possible. Video reconstruction remains bit-exact.
-
-## Implementation order
-
-1. WAV loader and its unit test.
-2. Forward DCT and the round-trip test.
-3. Block writer, syntax test, and decoder round-trip.
-4. Scheduler, chunk assembly, and duration test.
-5. Container metadata, public API, encode loop, and verify.
-6. `bink2_build --audio`, help text, and end-to-end test.
-7. Malformed cases, oracle comparison, docs, full release and sanitizer runs.
-
-## Approval
-
-Please confirm this design, especially:
-
-- the public API shape (`bink2_enc_audio` inside `bink2_enc_source`,
-  `audio_quality` in the options), and
-- the 1..65535 Hz limit with no resampling.
-
-With approval I will write the implementation plan and then build it in the
-order above.

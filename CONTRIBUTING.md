@@ -20,9 +20,11 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ```
 
-All 23 tests should pass or skip. Three tests (`decode_f`, `decode_g`,
-`audio`) skip unless the reference samples are available; see
-[Reference samples](#reference-samples).
+Every test should pass or skip. The reference tests (`decode_f`,
+`decode_g`, `audio`) and the player tests skip unless the reference samples
+are available; see [Reference samples](#reference-samples).
+`enc_audio_oracle` skips unless `BINK2_ORACLE` points at the pinned FFmpeg
+build; see [tests/README.md](tests/README.md#encoded-audio-oracle).
 
 ## Find your way around
 
@@ -106,6 +108,11 @@ For encoder changes, also encode something with `--verify`:
 ```sh
 build/bink2_build tests/media/fixture.png -o /tmp/fixture.bk2 --verify
 ```
+
+For audio encoder changes, add `--audio file.wav` with a PCM WAV of your own,
+and run `enc_audio_oracle` with `BINK2_ORACLE` set if you can build the
+oracle. Encoded audio is lossy: the tests check SNR and PCM length, so do not
+add byte-exact audio comparisons.
 
 ### Reference samples
 

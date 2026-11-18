@@ -100,6 +100,7 @@ build/bink2_build frames/ -o clip.bk2 --fps 30 --quality 85 --verify
 | [docs/architecture.md](docs/architecture.md) | Source map and design decisions |
 | [docs/bink2.md](docs/bink2.md) | Container and bitstream notes |
 | [docs/encoder.md](docs/encoder.md) | Encoder internals and validation |
+| [docs/audio-encoder-design.md](docs/audio-encoder-design.md) | Encoded audio: block syntax, quality control, limits |
 | [tests/README.md](tests/README.md) | Reference checksums and the oracle |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Setup, checks, and pull requests |
 | [AGENTS.md](AGENTS.md) | Instructions for coding agents |

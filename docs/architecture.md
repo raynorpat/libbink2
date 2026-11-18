@@ -9,6 +9,7 @@ shape everything else. Read it before changing decoder or encoder code.
 src/                 decoder library (libbink2) and shared codec code
 src/encoder/         encoder library (libbink2enc)
 src/tools/           bink2_build, bink2_dump, bink2_sdl_player
+src/tools/player/    renderer players (OpenGL, Metal, Vulkan, Direct3D)
 tests/               CTest programs, golden checksums, fixtures
 tests/media/         small committed fixtures
 third_party/stb/     stb_image.h, used only by the encoder's image loader
@@ -56,6 +57,8 @@ produced lazily on the first `bink2_get_video()` call for a frame.
 | `bink2_enc_dct.c` | Forward transform and quantisation. |
 | `bink2_enc_syntax.c` | Bitstream writers that mirror the decoder's readers. |
 | `bink2_enc_bits.c` | Bit counting for mode decisions. |
+| `bink2_enc_audio.c` | Bink Audio 2 track: scheduling, forward DCT, block writer. |
+| `bink2_enc_wav.c` | PCM WAV loading for `bink2_build --audio`. |
 | `bink2_enc_image.c`, `bink2_enc_stb.c` | Image loading for `bink2_build`, RGB to YUV. |
 
 ## Design decisions
@@ -78,6 +81,12 @@ reconstruction is therefore byte-identical to what the decoder produces, and
 the tests assert that for every frame. A change to shared codec code affects
 both libraries at once; a private reimplementation on the encoder side would
 break this guarantee.
+
+Audio follows the same idea with a weaker guarantee. The audio encoder takes
+its frame length, bands, and quantiser table from the decoder's
+`bink2_audio_describe()`, and its tests decode every block with the decoder.
+The transform is lossy, so audio is checked by SNR and PCM length, never byte
+for byte. See [audio-encoder-design.md](audio-encoder-design.md).
 
 ### Two syntax generations, one frame layer
 
