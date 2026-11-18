@@ -207,7 +207,7 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
                                      (unsigned long)source->height,
                                      source->fps_num, source->fps_den,
                                      source->frame_count,
-                                     slice_flags((unsigned) slices),
+                                     slice_flags((unsigned) slices), NULL, 0,
                                      &index_offset) != 0)
         return BINK2_ENC_ERR_ENCODE;
 

@@ -86,6 +86,10 @@ if(TARGET bink2_encoder)
   target_link_libraries(test_enc_audio PRIVATE bink2_encoder)
   add_test(NAME enc_audio COMMAND test_enc_audio)
 
+  add_executable(test_enc_container_audio test_enc_container_audio.c)
+  target_link_libraries(test_enc_container_audio PRIVATE bink2_encoder)
+  add_test(NAME enc_container_audio COMMAND test_enc_container_audio)
+
   add_executable(test_enc_image test_enc_image.c)
   target_link_libraries(test_enc_image PRIVATE bink2_encoder)
   target_compile_definitions(test_enc_image PRIVATE

@@ -20,11 +20,17 @@ int bink2_container_write_header(FILE *file, unsigned long width,
                                  unsigned long fps_den,
                                  unsigned long frame_count,
                                  unsigned long flags,
+                                 const Bink2EncAudioTrack *tracks,
+                                 unsigned long track_count,
                                  unsigned long *index_offset)
 {
     unsigned long i;
 
     if (file == NULL || frame_count == 0)
+        return -1;
+    if (track_count != 0 && tracks == NULL)
+        return -1;
+    if (track_count > (0xFFFFFFFFUL - BINK2_HEADER_SIZE) / 12UL)
         return -1;
     if (fwrite("KB2j", 1, 4, file) != 4)
         return -1;
@@ -46,16 +52,32 @@ int bink2_container_write_header(FILE *file, unsigned long width,
         return -1;
     if (write_u32(file, flags) != 0)
         return -1;
-    if (write_u32(file, 0) != 0)           /* audio tracks */
+    if (write_u32(file, track_count) != 0)
         return -1;
     if (write_u32(file, 0x87e70800UL) != 0)
         return -1;
+    for (i = 0; i < track_count; i++)
+        if (write_u32(file, tracks[i].max_decoded) != 0)
+            return -1;
+    for (i = 0; i < track_count; i++) {
+        unsigned long track_flags =
+            (tracks[i].use_dct ? 0x10UL : 0UL) |
+            (tracks[i].channels == 2 ? 0x20UL : 0UL);
+        unsigned long descriptor =
+            (tracks[i].rate & 0xFFFFFFUL) | (track_flags << 24);
+
+        if (write_u32(file, descriptor) != 0)
+            return -1;
+    }
+    for (i = 0; i < track_count; i++)
+        if (write_u32(file, tracks[i].id) != 0)
+            return -1;
+    if (index_offset != NULL)
+        *index_offset = BINK2_HEADER_SIZE + 12UL * track_count;
     for (i = 0; i < frame_count + 1; i++) {
         if (write_u32(file, 0) != 0)
             return -1;
     }
-    if (index_offset != NULL)
-        *index_offset = BINK2_HEADER_SIZE;
     return 0;
 }
 
