@@ -8,7 +8,7 @@ static int check_image(const char *path)
     unsigned char *rgb = NULL;
     unsigned width = 0, height = 0;
 
-    CHECK(bink2_enc_image_load(path, &rgb, &width, &height) == 0);
+    CHECK(bink2_enc_image_load(path, &rgb, &width, &height, NULL, 0) == 0);
     CHECK(width == 4 && height == 4);
     CHECK(rgb != NULL);
     free(rgb);
@@ -40,13 +40,28 @@ int main(void)
             CHECK(fwrite(px, 1, 3, file) == 3);
         }
     fclose(file);
-    CHECK(bink2_enc_image_load("test_enc_image.ppm", &rgb, &width, &height) ==
-          0);
+    CHECK(bink2_enc_image_load("test_enc_image.ppm", &rgb, &width, &height,
+                               NULL, 0) == 0);
     CHECK(width == 4 && height == 4 && rgb != NULL);
     free(rgb);
     remove("test_enc_image.ppm");
 
-    CHECK(bink2_enc_image_load("/nonexistent.png", &rgb, &width, &height) !=
-          0);
+    {
+        char err[128] = "";
+
+        CHECK(bink2_enc_image_load("/nonexistent.png", &rgb, &width, &height,
+                                   err, sizeof(err)) != 0);
+        CHECK(err[0] != '\0');
+
+        file = fopen("test_enc_image.ppm", "wb");
+        CHECK(file != NULL);
+        CHECK(fwrite("P6\n4 4\n65535\n", 1, 14, file) == 14);
+        fclose(file);
+        err[0] = '\0';
+        CHECK(bink2_enc_image_load("test_enc_image.ppm", &rgb, &width,
+                                   &height, err, sizeof(err)) != 0);
+        CHECK(strstr(err, "maxval") != NULL);
+        remove("test_enc_image.ppm");
+    }
     return 0;
 }

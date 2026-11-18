@@ -139,26 +139,26 @@ static int load_stb(const char *path, uint8_t **rgb,
 }
 
 int bink2_enc_image_load(const char *path, unsigned char **rgb,
-                         unsigned *width, unsigned *height)
+                         unsigned *width, unsigned *height, char *err,
+                         size_t errlen)
 {
     FILE *fp;
     int status;
-    char err[128];
 
     if (path == NULL || rgb == NULL || width == NULL || height == NULL)
-        return -1;
+        return fail(err, errlen, "invalid arguments");
     fp = fopen(path, "rb");
     if (fp == NULL)
-        return -1;
+        return fail(err, errlen, "cannot open image");
     if (ends_with(path, ".png") || ends_with(path, ".jpg") ||
         ends_with(path, ".jpeg") || ends_with(path, ".bmp")) {
         fclose(fp);
-        return load_stb(path, rgb, width, height, err, sizeof(err));
+        return load_stb(path, rgb, width, height, err, errlen);
     }
     if (ends_with(path, ".ppm"))
-        status = load_ppm(fp, rgb, width, height, err, sizeof(err));
+        status = load_ppm(fp, rgb, width, height, err, errlen);
     else
-        status = -1;
+        status = fail(err, errlen, "unsupported image extension");
     fclose(fp);
     return status;
 }

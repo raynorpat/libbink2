@@ -376,6 +376,9 @@ static void input_close(build_input *input)
 typedef struct {
     build_input input;
     Bink2EncWav wav;
+    /* Why the first failed frame callback failed; the library only
+     * reports that one did. */
+    char frame_error[512];
 } build_media;
 
 static int input_read_frame(void *user, unsigned long index, unsigned char *rgb)
@@ -384,12 +387,25 @@ static int input_read_frame(void *user, unsigned long index, unsigned char *rgb)
     build_input *input = &media->input;
     unsigned char *loaded = NULL;
     unsigned width = 0;
-    unsigned height = 0;    if (input == NULL || rgb == NULL || index >= input->count)
+    unsigned height = 0;
+    char reason[128] = "";
+
+    if (input == NULL || rgb == NULL || index >= input->count)
         return -1;
-    if (bink2_enc_image_load(input->paths[index], &loaded, &width,
-                             &height) != 0)
+    if (bink2_enc_image_load(input->paths[index], &loaded, &width, &height,
+                             reason, sizeof(reason)) != 0) {
+        if (media->frame_error[0] == '\0')
+            snprintf(media->frame_error, sizeof(media->frame_error),
+                     "frame %lu (%s): %s", index, input->paths[index],
+                     reason);
         return -1;
+    }
     if (width != input->width || height != input->height) {
+        if (media->frame_error[0] == '\0')
+            snprintf(media->frame_error, sizeof(media->frame_error),
+                     "frame %lu (%s) is %ux%u, expected %ux%u", index,
+                     input->paths[index], width, height, input->width,
+                     input->height);
         free(loaded);
         return -1;
     }
@@ -415,7 +431,8 @@ static int input_read_audio(void *user, unsigned long start,
     return 0;
 }
 
-static int input_open(const char *path, int directory, build_input *input)
+static int input_open(const char *path, int directory, build_input *input,
+                      char *err, size_t errlen)
 {
     char **names = NULL;
     unsigned count = 0;
@@ -458,7 +475,8 @@ static int input_open(const char *path, int directory, build_input *input)
         input->count = i + 1;
     }
     free_names(names, count);
-    if (bink2_enc_image_load(input->paths[0], &probe, &width, &height) != 0) {
+    if (bink2_enc_image_load(input->paths[0], &probe, &width, &height, err,
+                             errlen) != 0) {
         input_close(input);
         return -1;
     }
@@ -480,6 +498,7 @@ int main(int argc, char **argv)
     const char *output = NULL;
     const char *recon = NULL;
     char output_buffer[4096];
+    char input_err[128] = "";
     char err[512];
     unsigned long fps_num = 30;
     unsigned long fps_den = 1;
@@ -580,8 +599,13 @@ int main(int argc, char **argv)
         output = output_buffer;
     }
 
-    if (input_open(image_input, path_is_dir(image_input), input) != 0) {
-        fprintf(stderr, "bink2_build: cannot read image input\n");
+    if (input_open(image_input, path_is_dir(image_input), input,
+                   input_err, sizeof(input_err)) != 0) {
+        if (input_err[0] != '\0')
+            fprintf(stderr, "bink2_build: cannot read image input: %s\n",
+                    input_err);
+        else
+            fprintf(stderr, "bink2_build: cannot read image input\n");
         input_close(input);
         return BINK2_ENC_ERR_INPUT;
     }
@@ -617,7 +641,9 @@ int main(int argc, char **argv)
         fprintf(stderr, "bink2_build: encoding %s\n", image_input);
     status = bink2_enc_encode(&source, &options, output, err, sizeof(err));
     if (status != BINK2_ENC_OK) {
-        if (err[0] != '\0')
+        if (status == BINK2_ENC_ERR_INPUT && media.frame_error[0] != '\0')
+            fprintf(stderr, "bink2_build: %s\n", media.frame_error);
+        else if (err[0] != '\0')
             fprintf(stderr, "bink2_build: %s\n", err);
         bink2_enc_wav_free(&media.wav);
         input_close(input);

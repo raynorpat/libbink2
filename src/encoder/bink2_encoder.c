@@ -527,7 +527,8 @@ bink2_enc_status bink2_enc_encode(const bink2_enc_source *source,
     }
     if (!valid_options(options)) {
         set_error(err, errlen, "invalid options: slices must be 2, 3, 4 or 8, "
-                               "motion_range 0..64, quality 0..100");
+                               "motion_range 0..64, quality and "
+                               "audio_quality 0..100");
         return BINK2_ENC_ERR_USAGE;
     }
 

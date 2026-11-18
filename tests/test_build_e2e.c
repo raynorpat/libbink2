@@ -99,6 +99,83 @@ static int write_wav(const char *path)
     return fclose(file) == 0 ? 0 : -1;
 }
 
+static int file_contains(const char *path, const char *needle)
+{
+    char text[1024];
+    size_t got;
+    FILE *file = fopen(path, "rb");
+
+    if (file == NULL)
+        return 0;
+    got = fread(text, 1, sizeof(text) - 1, file);
+    fclose(file);
+    text[got] = '\0';
+    return strstr(text, needle) != NULL;
+}
+
+static void make_dir(const char *path)
+{
+#if defined(_WIN32)
+    _mkdir(path);
+#else
+    mkdir(path, 0777);
+#endif
+}
+
+static void remove_dir(const char *path)
+{
+#if defined(_WIN32)
+    _rmdir(path);
+#else
+    rmdir(path);
+#endif
+}
+
+/* A frame whose size differs from the first must be named in the error,
+ * and a bad first image must say why it was rejected. */
+static int test_input_errors(void)
+{
+    char command[1024];
+    FILE *file;
+
+    make_dir("build_e2e_bad");
+    CHECK(write_ppm("build_e2e_bad/frame0.ppm", 0) == 0);
+    file = fopen("build_e2e_bad/frame1.ppm", "wb");
+    CHECK(file != NULL);
+    CHECK(fprintf(file, "P6\n8 8\n255\n") > 0);
+    {
+        static const unsigned char black[8 * 8 * 3] = { 0 };
+
+        CHECK(fwrite(black, 1, sizeof(black), file) == sizeof(black));
+    }
+    CHECK(fclose(file) == 0);
+    snprintf(command, sizeof(command),
+             "\"%s\" build_e2e_bad -o build_e2e_bad.bk2 2> build_e2e_err.txt",
+             BINK2_BUILD_EXE);
+    CHECK(system(command) != 0);
+    CHECK(file_contains("build_e2e_err.txt", "frame 1"));
+    CHECK(file_contains("build_e2e_err.txt", "frame1.ppm"));
+    CHECK(file_contains("build_e2e_err.txt", "8x8"));
+
+    file = fopen("build_e2e_bad.ppm", "wb");
+    CHECK(file != NULL);
+    CHECK(fprintf(file, "P6\n4 4\n65535\n") > 0);
+    CHECK(fclose(file) == 0);
+    snprintf(command, sizeof(command),
+             "\"%s\" build_e2e_bad.ppm -o build_e2e_bad.bk2 "
+             "2> build_e2e_err.txt", BINK2_BUILD_EXE);
+    CHECK(system(command) != 0);
+    CHECK(file_contains("build_e2e_err.txt", "maxval"));
+
+    remove("build_e2e_bad/frame0.ppm");
+    remove("build_e2e_bad/frame1.ppm");
+    remove_dir("build_e2e_bad");
+    remove("build_e2e_bad.ppm");
+    remove("build_e2e_bad.bk2");
+    remove("build_e2e_err.txt");
+    return 0;
+}
+
 int main(void)
 {
     char path[128];
@@ -113,11 +190,8 @@ int main(void)
     unsigned long rates[7] = { 0 };
     unsigned long audio_bytes = 0;
 
-#if defined(_WIN32)
-    _mkdir("build_e2e_frames");
-#else
-    mkdir("build_e2e_frames", 0777);
-#endif
+    CHECK(test_input_errors() == 0);
+    make_dir("build_e2e_frames");
     for (frame = 0; frame < FRAMES; frame++) {
         snprintf(path, sizeof(path), "build_e2e_frames/frame%d.ppm", frame);
         CHECK(write_ppm(path, frame) == 0);
@@ -149,11 +223,7 @@ int main(void)
         snprintf(path, sizeof(path), "build_e2e_frames/frame%d.ppm", frame);
         remove(path);
     }
-#if defined(_WIN32)
-    _rmdir("build_e2e_frames");
-#else
-    rmdir("build_e2e_frames");
-#endif
+    remove_dir("build_e2e_frames");
     remove("build_e2e.wav");
     remove("build_e2e.bk2");
     return 0;

@@ -154,13 +154,14 @@ static int test_usage_rejects(void)
     REJECT_OPT(quality, 101);
     REJECT_OPT(audio_quality, -1);
     REJECT_OPT(audio_quality, 101);
+    CHECK(strstr(err, "audio_quality") != NULL);
 
     valid_source(&src);
     src.audio.channels = 3;
     err[0] = '\0';
     CHECK(bink2_enc_encode(&src, &o, "x.bk2", err, sizeof(err)) ==
           BINK2_ENC_ERR_USAGE);
-    CHECK(err[0] != '\0');
+    CHECK(strstr(err, "audio") != NULL);
 
     valid_source(&src);
     src.audio.channels = 1;
