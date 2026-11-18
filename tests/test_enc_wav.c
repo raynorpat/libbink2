@@ -15,6 +15,9 @@ typedef struct {
     size_t payload_size;
     int with_fmt;
     int junk;
+    int second_fmt;
+    unsigned second_tag;
+    int oversized_tail;
 } WavSpec;
 
 static void put16(unsigned char *p, unsigned value)
@@ -52,9 +55,13 @@ static int write_wav(const WavSpec *spec)
     riff = 4;
     if (spec->with_fmt)
         riff += 8 + 16;
+    if (spec->second_fmt)
+        riff += 8 + 16;
     if (spec->junk)
         riff += 8 + 4;
     riff += 8 + spec->claimed_data + (spec->claimed_data & 1);
+    if (spec->oversized_tail)
+        riff += 8;
     if (fwrite("RIFF", 1, 4, file) != 4) {
         fclose(file);
         return -1;
@@ -73,6 +80,28 @@ static int write_wav(const WavSpec *spec)
         unsigned char fmt[16];
 
         put16(fmt + 0, spec->tag);
+        put16(fmt + 2, spec->channels);
+        put32(fmt + 4, spec->rate);
+        put32(fmt + 8, spec->rate * block);
+        put16(fmt + 12, block);
+        put16(fmt + 14, spec->bits);
+        if (write_at(file, offset, "fmt ", 4) != 0) {
+            fclose(file);
+            return -1;
+        }
+        put32(header, 16);
+        if (write_at(file, offset + 4, header, 4) != 0 ||
+            write_at(file, offset + 8, fmt, 16) != 0) {
+            fclose(file);
+            return -1;
+        }
+        offset += 24;
+    }
+    if (spec->second_fmt) {
+        unsigned block = spec->channels * (spec->bits / 8);
+        unsigned char fmt[16];
+
+        put16(fmt + 0, spec->second_tag);
         put16(fmt + 2, spec->channels);
         put32(fmt + 4, spec->rate);
         put32(fmt + 8, spec->rate * block);
@@ -126,6 +155,14 @@ static int write_wav(const WavSpec *spec)
         unsigned char zero = 0;
 
         if (write_at(file, offset, &zero, 1) != 0)
+            goto fail;
+        offset++;
+    }
+    if (spec->oversized_tail) {
+        if (write_at(file, offset, "JUNK", 4) != 0)
+            goto fail;
+        put32(header, 0xFFFFFF00UL);
+        if (write_at(file, offset + 4, header, 4) != 0)
             goto fail;
     }
     return fclose(file) == 0 ? 0 : -1;
@@ -264,6 +301,36 @@ static int expect_reject(const WavSpec *spec)
     return 0;
 }
 
+static int test_second_fmt_ignored(void)
+{
+    static const unsigned char payload[4] = { 0x34, 0x12, 0x78, 0x56 };
+    WavSpec spec = { 1, 16, 1, 44100, 4, payload, 4, 1, 0, 1, 3, 0 };
+    Bink2EncWav wav;
+
+    if (load_or_fail(&spec, &wav) != 0)
+        return 1;
+    CHECK(wav.sample_count == 2);
+    CHECK(wav.pcm[0] == 0x1234);
+    CHECK(wav.pcm[1] == 0x5678);
+    return finish(&wav);
+}
+
+static int test_oversized_unknown_chunk(void)
+{
+    static const unsigned char payload[4] = { 0x34, 0x12, 0x78, 0x56 };
+    WavSpec spec = { 1, 16, 1, 44100, 4, payload, 4, 1, 0, 0, 0, 1 };
+    Bink2EncWav wav;
+    char err[128] = "";
+
+    CHECK(write_wav(&spec) == 0);
+    memset(&wav, 0, sizeof(wav));
+    CHECK(bink2_enc_wav_load(TMP_WAV, &wav, err, sizeof(err)) == -1);
+    CHECK(err[0] != '\0');
+    CHECK(wav.pcm == NULL);
+    remove(TMP_WAV);
+    return 0;
+}
+
 static int test_rejects(void)
 {
     static const unsigned char payload[16] = { 0 };
@@ -301,6 +368,8 @@ int main(void)
     CHECK(test_24_bit_stereo() == 0);
     CHECK(test_odd_chunks() == 0);
     CHECK(test_truncated_data() == 0);
+    CHECK(test_second_fmt_ignored() == 0);
+    CHECK(test_oversized_unknown_chunk() == 0);
     CHECK(test_rejects() == 0);
     return 0;
 }

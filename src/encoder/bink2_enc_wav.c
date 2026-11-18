@@ -84,16 +84,18 @@ int bink2_enc_wav_load(const char *path, Bink2EncWav *wav, char *err,
         /* A chunk that claims more than the file holds must not wrap a
          * 32-bit length and seek backwards into the same chunk. */
         if (size > (unsigned long)(file_len - body)) {
-            if (memcmp(chunk, "data", 4) == 0 && data == NULL) {
-                fclose(file);
-                return fail(err, errlen, "truncated WAV data");
-            }
-            break;
+            int is_data = memcmp(chunk, "data", 4) == 0;
+
+            fclose(file);
+            free(data);
+            return fail(err, errlen,
+                        is_data ? "truncated WAV data"
+                                : "truncated WAV chunk");
         }
         next = body + (long)size;
         if ((size & 1UL) != 0 && next < file_len)
             next++;
-        if (memcmp(chunk, "fmt ", 4) == 0) {
+        if (memcmp(chunk, "fmt ", 4) == 0 && !have_fmt) {
             unsigned char fmt[16];
 
             if (size < sizeof(fmt) || fread(fmt, 1, sizeof(fmt), file) !=
