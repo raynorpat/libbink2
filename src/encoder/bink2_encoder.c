@@ -241,7 +241,7 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
                 &audio, source->audio.rate, audio_channels,
                 source->audio.sample_count, source->fps_num, source->fps_den,
                 source->frame_count, options->audio_quality,
-                &audio_max_decoded) != 0)
+                options->verbose, &audio_max_decoded) != 0)
             return BINK2_ENC_ERR_INPUT;
         audio_track.rate = source->audio.rate;
         audio_track.channels = audio_channels;

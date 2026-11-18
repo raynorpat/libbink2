@@ -83,7 +83,9 @@ Set `source.audio.channels` to 1 or 2, `source.audio.rate` to 1..65535 Hz, and
 
 Audio runs for the video duration. Samples past the end are ignored, and a
 short track is padded with silence. `options.audio_quality` is 0..100 and
-scales the per-band quantiser; it does not target a bitrate.
+scales the per-band quantiser; it does not target a bitrate. A coefficient that
+would exceed the block syntax's 15-bit width is clamped, and `--verbose`
+reports the clipped block.
 
 The audio output is lossy and is not compared byte for byte. `verify` decodes
 every audio chunk and requires its total PCM size to match the encoder's, and

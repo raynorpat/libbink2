@@ -92,7 +92,7 @@ static int encode_all(unsigned long rate, int channels,
     source.frames = sample_count;
     source.channels = channels;
     CHECK(bink2_enc_audio_open(&out->audio, rate, channels, sample_count,
-                               fps_num, fps_den, frames, quality,
+                               fps_num, fps_den, frames, quality, 0,
                                &out->max_decoded) == 0);
     out->payload = (unsigned char **)calloc(frames, sizeof(unsigned char *));
     out->payload_size = (size_t *)calloc(frames, sizeof(size_t));
@@ -617,6 +617,21 @@ static int test_video_truncation(void)
     return 0;
 }
 
+static int test_clamp(void)
+{
+    unsigned long magnitude = 0;
+
+    CHECK(bink2_enc_audio_clamp(0, &magnitude) == 0 && magnitude == 0);
+    CHECK(bink2_enc_audio_clamp(32767, &magnitude) == 0 &&
+          magnitude == 32767);
+    CHECK(bink2_enc_audio_clamp(32768, &magnitude) == 1 &&
+          magnitude == 32767);
+    CHECK(bink2_enc_audio_clamp(100000, &magnitude) == 1 &&
+          magnitude == 32767);
+    CHECK(bink2_enc_audio_clamp(32767, NULL) == 0);
+    return 0;
+}
+
 int main(void)
 {
     CHECK(test_one_block() == 0);
@@ -630,5 +645,6 @@ int main(void)
     CHECK(test_bit_positions() == 0);
     CHECK(test_zero_blocks() == 0);
     CHECK(test_video_truncation() == 0);
+    CHECK(test_clamp() == 0);
     return 0;
 }

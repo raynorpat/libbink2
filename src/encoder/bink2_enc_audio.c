@@ -15,6 +15,7 @@
 
 #include <math.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -42,6 +43,7 @@ struct Bink2EncAudio {
     int channels;
     int block_out;
     int quality;
+    int verbose;
     Bink2EncDct dct;
     float *frame;
     short *samples;
@@ -190,6 +192,18 @@ static int bit_length(unsigned long value)
     return bits;
 }
 
+int bink2_enc_audio_clamp(unsigned long magnitude, unsigned long *out)
+{
+    if (magnitude > 32767UL) {
+        if (out != NULL)
+            *out = 32767UL;
+        return 1;
+    }
+    if (out != NULL)
+        *out = magnitude;
+    return 0;
+}
+
 static int quantised(const Bink2AudioInfo *info, int band, double value)
 {
     double step = (double)info->quant[band];
@@ -206,6 +220,7 @@ static int write_block(Bink2EncAudio *audio, Bink2BitWriter *bw)
     int target = 8;
     int band_q[25];
     int shift;
+    int clipped = 0;
     int ch;
 
     shift = audio->quality * 10 / 100;
@@ -330,8 +345,8 @@ static int write_block(Bink2EncAudio *audio, Bink2BitWriter *bw)
                             value < 0 ? (unsigned long)(-value)
                                       : (unsigned long)value;
 
-                        if (magnitude > 32767)
-                            magnitude = 32767;
+                        if (bink2_enc_audio_clamp(magnitude, &magnitude))
+                            clipped = 1;
                         magnitudes[k - i] = magnitude;
                         if (bink2_bw_put(bw, (unsigned)magnitude, width) != 0)
                             return -1;
@@ -350,6 +365,8 @@ static int write_block(Bink2EncAudio *audio, Bink2BitWriter *bw)
             }
         }
     }
+    if (clipped && audio->verbose)
+        fprintf(stderr, "bink2 encoder: audio block clipped to 15 bits\n");
     return 0;
 }
 
@@ -377,7 +394,7 @@ static int read_pcm(Bink2EncAudio *audio,
 int bink2_enc_audio_open(Bink2EncAudio **out, unsigned long rate,
                          int channels, unsigned long sample_count,
                          unsigned long fps_num, unsigned long fps_den,
-                         unsigned long frame_count, int quality,
+                         unsigned long frame_count, int quality, int verbose,
                          unsigned long *max_decoded)
 {
     Bink2EncAudio *audio;
@@ -408,6 +425,7 @@ int bink2_enc_audio_open(Bink2EncAudio **out, unsigned long rate,
     audio->channels = channels;
     audio->block_out = audio->info.frame_len - audio->info.overlap_len;
     audio->quality = quality;
+    audio->verbose = verbose;
     audio->dct.frame_len = audio->info.frame_len;
     audio->dct.re = (double *)calloc((size_t)audio->info.frame_len * 2u,
                                      sizeof(double));
