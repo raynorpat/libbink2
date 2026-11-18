@@ -316,6 +316,9 @@ static int boundary_case(unsigned long rate, unsigned long expected_block)
     unsigned long block_out = block_out_for(rate);
     short *pcm = make_sine(rate, block_out, 1, 1000.0, 0.5);
     Encoded encoded;
+    short *decoded = NULL;
+    unsigned long decoded_frames = 0;
+    double snr;
 
     CHECK(block_out == expected_block);
     CHECK(pcm != NULL);
@@ -325,6 +328,16 @@ static int boundary_case(unsigned long rate, unsigned long expected_block)
         return 1;
     }
     CHECK(encoded.pcm_bytes[0] == block_out * 2UL);
+    if (decode_all(&encoded, rate, 1, &decoded, &decoded_frames) != 0) {
+        free(pcm);
+        free_encoded(&encoded);
+        return 1;
+    }
+    CHECK(decoded_frames == block_out);
+    snr = snr_between(decoded, decoded_frames, pcm, block_out, 1,
+                      overlap_for(rate));
+    CHECK(snr >= 25.0);
+    free(decoded);
     free(pcm);
     free_encoded(&encoded);
     return 0;
@@ -370,12 +383,18 @@ static int test_quality(void)
 {
     unsigned long low_bytes = 0;
     unsigned long high_bytes = 0;
+    unsigned long zero_bytes = 0;
     double low_snr = 0.0;
     double high_snr = 0.0;
+    double zero_snr = 0.0;
 
+    CHECK(quality_case(0, &zero_bytes, &zero_snr) == 0);
     CHECK(quality_case(20, &low_bytes, &low_snr) == 0);
     CHECK(quality_case(80, &high_bytes, &high_snr) == 0);
-    CHECK(low_bytes <= high_bytes);
+    /* Measured: q0 18.6 dB / 4216 B, q20 30.5 dB / 7124 B,
+     * q80 63.9 dB / 40648 B on the 1 kHz stereo test tone. */
+    CHECK(zero_bytes <= low_bytes && low_bytes <= high_bytes);
+    CHECK(zero_snr >= 5.0);
     CHECK(low_snr >= 10.0);
     CHECK(high_snr >= 25.0);
     return 0;
@@ -412,7 +431,7 @@ static int test_silence_size(void)
 static int test_full_scale_hf(void)
 {
     unsigned long source_frames = 48000;
-    short *pcm = make_sine(48000, source_frames, 2, 20000.0, 0.95);
+    short *pcm = make_sine(48000, source_frames, 2, 20000.0, 1.0);
     Encoded encoded;
     short *decoded = NULL;
     unsigned long decoded_frames = 0;
@@ -431,6 +450,7 @@ static int test_full_scale_hf(void)
     }
     CHECK(decoded_frames == 48000);
     snr = snr_between(decoded, decoded_frames, pcm, source_frames, 2, 128);
+    /* Measured 50.3 dB at 0 dBFS, 20 kHz, stereo, quality 80. */
     CHECK(snr >= 8.0);
     free(decoded);
     free(pcm);
@@ -556,12 +576,44 @@ static int test_zero_blocks(void)
         return 1;
     }
     CHECK(decoded_frames == 960);
-    snr = snr_between(decoded, decoded_frames, pcm, source_frames, 1,
+    /* Four 60 fps frames at 8 kHz cover 533 samples; the rest is padding. */
+    snr = snr_between(decoded, decoded_frames, pcm, 533, 1,
                       overlap_for(8000));
     CHECK(snr >= 25.0);
     free(decoded);
     free(pcm);
     free_encoded(&encoded);
+    return 0;
+}
+
+static int test_video_truncation(void)
+{
+    unsigned long frames = 3;
+    short *long_pcm = make_sine(48000, 8000, 2, 1000.0, 0.5);
+    short *short_pcm = make_sine(48000, 6000, 2, 1000.0, 0.5);
+    Encoded long_encoded;
+    Encoded short_encoded;
+    unsigned long f;
+
+    CHECK(long_pcm != NULL && short_pcm != NULL);
+    if (encode_all(48000, 2, 8000, long_pcm, 24, 1, frames, 80,
+                   &long_encoded) != 0 ||
+        encode_all(48000, 2, 6000, short_pcm, 24, 1, frames, 80,
+                   &short_encoded) != 0) {
+        free(long_pcm);
+        free(short_pcm);
+        return 1;
+    }
+    for (f = 0; f < frames; f++) {
+        CHECK(long_encoded.payload_size[f] ==
+              short_encoded.payload_size[f]);
+        CHECK(memcmp(long_encoded.payload[f], short_encoded.payload[f],
+                     short_encoded.payload_size[f]) == 0);
+    }
+    free_encoded(&long_encoded);
+    free_encoded(&short_encoded);
+    free(long_pcm);
+    free(short_pcm);
     return 0;
 }
 
@@ -577,5 +629,6 @@ int main(void)
     CHECK(test_full_scale_hf() == 0);
     CHECK(test_bit_positions() == 0);
     CHECK(test_zero_blocks() == 0);
+    CHECK(test_video_truncation() == 0);
     return 0;
 }

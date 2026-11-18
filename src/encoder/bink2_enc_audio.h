@@ -5,6 +5,9 @@
 
 typedef struct Bink2EncAudio Bink2EncAudio;
 
+/* bink2_enc_audio_frame returns this when the source callback fails. */
+#define BINK2_ENC_AUDIO_INPUT (-2)
+
 /**
  * Open one Bink Audio 2 DCT track. `sample_count` is per channel. Audio runs
  * for the video duration; samples past it are ignored, missing samples are

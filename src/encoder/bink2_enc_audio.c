@@ -38,6 +38,7 @@ struct Bink2EncAudio {
     uint64_t target;
     uint64_t produced;
     unsigned long source_pos;
+    unsigned long video_end;
     int channels;
     int block_out;
     int quality;
@@ -359,12 +360,15 @@ static int read_pcm(Bink2EncAudio *audio,
                     short *dst)
 {
     size_t samples = (size_t)count * (size_t)audio->channels;
+    unsigned long limit = audio->sample_count;
 
     memset(dst, 0, samples * sizeof(short));
-    if (start >= audio->sample_count)
+    if (audio->video_end < limit)
+        limit = audio->video_end;
+    if (start >= limit)
         return 0;
-    if (count > audio->sample_count - start)
-        count = audio->sample_count - start;
+    if (count > limit - start)
+        count = limit - start;
     if (count == 0)
         return 0;
     return read_audio(user, start, count, dst) == 0 ? 0 : -1;
@@ -427,6 +431,11 @@ int bink2_enc_audio_open(Bink2EncAudio **out, unsigned long rate,
         video_samples += acc / fps_num;
         acc %= fps_num;
     }
+    if (video_samples > 0xffffffffUL) {
+        bink2_enc_audio_close(audio);
+        return -1;
+    }
+    audio->video_end = (unsigned long)video_samples;
     video_samples += (uint64_t)audio->block_out;
     if (video_samples > UINT64_MAX / ((uint64_t)channels * 2u)) {
         bink2_enc_audio_close(audio);
@@ -525,7 +534,7 @@ int bink2_enc_audio_frame(Bink2EncAudio *audio,
                      audio->samples + (size_t)audio->block_out *
                                           (size_t)audio->channels) != 0) {
             bink2_bw_free(&writer);
-            return -1;
+            return BINK2_ENC_AUDIO_INPUT;
         }
         for (c = 0; c < audio->channels; c++) {
             float *dst = audio->frame + (size_t)c *

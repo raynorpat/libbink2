@@ -360,15 +360,20 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
         audio_payload = NULL;
         audio_size = 0;
         audio_pcm_bytes = 0;
-        if (audio != NULL &&
-            bink2_enc_audio_frame(audio, source->read_audio, source->user,
-                                  f + 1 == source->frame_count,
-                                  &audio_payload, &audio_size,
-                                  &audio_pcm_bytes) != 0) {
-            bink2_bw_free(&bw);
-            bink2_video_uninit(&state);
-            bink2_frame_free(&frame);
-            goto done;
+        if (audio != NULL) {
+            int audio_status = bink2_enc_audio_frame(
+                audio, source->read_audio, source->user,
+                f + 1 == source->frame_count, &audio_payload, &audio_size,
+                &audio_pcm_bytes);
+
+            if (audio_status != 0) {
+                if (audio_status == BINK2_ENC_AUDIO_INPUT)
+                    input_failed = 1;
+                bink2_bw_free(&bw);
+                bink2_video_uninit(&state);
+                bink2_frame_free(&frame);
+                goto done;
+            }
         }
         audio_pcm_total += (unsigned long)audio_pcm_bytes;
         offset = ftell(file);
@@ -522,7 +527,8 @@ bink2_enc_status bink2_enc_encode(const bink2_enc_source *source,
         return BINK2_ENC_ERR_VERIFY;
     }
     if (rc == BINK2_ENC_ERR_INPUT) {
-        set_error(err, errlen, "failed to read a source frame");
+        set_error(err, errlen,
+                  "failed to read a source frame or audio sample");
         return BINK2_ENC_ERR_INPUT;
     }
     if (rc != BINK2_ENC_OK) {

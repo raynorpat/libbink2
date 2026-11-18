@@ -1,6 +1,31 @@
 #include "bink2_encoder.h"
 #include "test_common.h"
 
+typedef struct {
+    int width;
+    int height;
+} FrameCtx;
+
+static int read_rgb_fill(void *user, unsigned long frame,
+                         unsigned char *dst)
+{
+    const FrameCtx *ctx = (const FrameCtx *)user;
+    size_t size = (size_t)ctx->width * (size_t)ctx->height * 3u;
+
+    memset(dst, (int)(frame & 0xFF), size);
+    return 0;
+}
+
+static int read_audio_fail(void *user, unsigned long start,
+                           unsigned long count, short *dst)
+{
+    (void)user;
+    (void)start;
+    (void)count;
+    (void)dst;
+    return 1;
+}
+
 static int read_rgb(void *user, unsigned long frame, unsigned char *dst)
 {
     (void)user;
@@ -158,9 +183,37 @@ static int test_usage_rejects(void)
     return 0;
 }
 
+static int test_audio_callback_failure(void)
+{
+    bink2_enc_source src;
+    bink2_enc_options o;
+    FrameCtx ctx = { 32, 32 };
+    char err[256] = "";
+
+    memset(&src, 0, sizeof(src));
+    src.width = 32;
+    src.height = 32;
+    src.frame_count = 2;
+    src.fps_num = 25;
+    src.fps_den = 1;
+    src.read_frame = read_rgb_fill;
+    src.user = &ctx;
+    src.audio.rate = 48000;
+    src.audio.channels = 1;
+    src.audio.sample_count = 1000;
+    src.read_audio = read_audio_fail;
+    bink2_enc_options_default(&o);
+    CHECK(bink2_enc_encode(&src, &o, "test_enc_api_audio.bk2", err,
+                           sizeof(err)) == BINK2_ENC_ERR_INPUT);
+    CHECK(err[0] != '\0');
+    remove("test_enc_api_audio.bk2");
+    return 0;
+}
+
 int main(void)
 {
     CHECK(test_defaults() == 0);
     CHECK(test_usage_rejects() == 0);
+    CHECK(test_audio_callback_failure() == 0);
     return 0;
 }
