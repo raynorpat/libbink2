@@ -49,9 +49,9 @@ typedef struct {
  * bytes, top-down) or `read_frame_yuv` (tight Y, then U, then V planes), or
  * both. Returning nonzero from a callback reports a read failure.
  *
- * When `audio.channels` is nonzero, `read_audio` fills `sample_count * 2`
- * bytes of interleaved host-endian signed 16-bit PCM for the sample range.
- * It must be repeatable.
+ * When `audio.channels` is nonzero, `read_audio` fills
+ * `sample_count * channels` interleaved host-endian signed 16-bit samples for
+ * the requested range. It must be repeatable.
  */
 typedef struct {
     int width;
