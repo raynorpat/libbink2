@@ -1,6 +1,8 @@
 #include "bink2_encoder.h"
 #include "test_common.h"
 
+#include <limits.h>
+
 typedef struct {
     int width;
     int height;
@@ -121,6 +123,12 @@ static int test_usage_rejects(void)
     REJECT(frame_count, 1000001UL);
     REJECT(fps_num, 0);
     REJECT(fps_den, 0);
+#if ULONG_MAX > 0xFFFFFFFFUL
+    /* The header stores both as 32-bit fields; larger values would be
+     * truncated. */
+    REJECT(fps_num, 0x100000000UL);
+    REJECT(fps_den, 0x100000000UL);
+#endif
     valid_source(&src);
     src.read_frame = NULL;
     src.read_frame_yuv = NULL;

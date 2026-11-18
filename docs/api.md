@@ -210,7 +210,7 @@ int encode(void *frames_ctx)
 | --- | --- |
 | `width`, `height` | 1..7680 and 1..4800. Odd sizes are accepted. |
 | `frame_count` | 1..1,000,000 |
-| `fps_num`, `fps_den` | Both nonzero |
+| `fps_num`, `fps_den` | Each 1..4294967295; the header stores them as 32-bit fields |
 | `read_frame` | Packed RGB24, top-down, `width*height*3` bytes |
 | `read_frame_yuv` | Tight Y, U, V planes (chroma `(width+1)/2` by `(height+1)/2`) |
 | `audio.rate` | 1..65535 Hz when audio is enabled |

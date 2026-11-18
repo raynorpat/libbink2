@@ -142,9 +142,10 @@ static double frame_psnr(const char *path, unsigned long target,
     return 10.0 * log10(255.0 * 255.0 / mse);
 }
 
-static int encode(const char *path, const char *recon, unsigned long frames,
-                  int quality, unsigned long bitrate, unsigned key_interval,
-                  int black_frame)
+static int encode_scaled(const char *path, const char *recon,
+                         unsigned long frames, int quality,
+                         unsigned long bitrate, unsigned key_interval,
+                         int black_frame, unsigned long fps_scale)
 {
     SourceCtx ctx;
     bink2_enc_source src;
@@ -156,8 +157,8 @@ static int encode(const char *path, const char *recon, unsigned long frames,
     src.width = TEST_WIDTH;
     src.height = TEST_HEIGHT;
     src.frame_count = frames;
-    src.fps_num = TEST_FPS;
-    src.fps_den = 1;
+    src.fps_num = TEST_FPS * fps_scale;
+    src.fps_den = fps_scale;
     src.read_frame_yuv = read_yuv;
     src.user = &ctx;
 
@@ -168,6 +169,14 @@ static int encode(const char *path, const char *recon, unsigned long frames,
     options.motion_range = 4;
     options.recon_path = recon;
     return bink2_enc_encode(&src, &options, path, err, sizeof(err));
+}
+
+static int encode(const char *path, const char *recon, unsigned long frames,
+                  int quality, unsigned long bitrate, unsigned key_interval,
+                  int black_frame)
+{
+    return encode_scaled(path, recon, frames, quality, bitrate, key_interval,
+                         black_frame, 1);
 }
 
 static int index_is_key(const char *path, unsigned long frame)
@@ -182,6 +191,47 @@ static int index_is_key(const char *path, unsigned long frame)
     key = bytes[0] & 1;
     fclose(file);
     return key;
+}
+
+/* At the largest size, a black-to-white cut sums 7680*4800*255 luma
+ * differences: more than 32 bits. A wrapped sum fell below the threshold
+ * and missed the cut where long is 32 bits. */
+#define BIG_WIDTH 7680
+#define BIG_HEIGHT 4800
+
+static int read_flat(void *user, unsigned long frame, unsigned char *y,
+                     unsigned char *u, unsigned char *v)
+{
+    size_t luma = (size_t)BIG_WIDTH * BIG_HEIGHT;
+    size_t chroma = (size_t)(BIG_WIDTH / 2) * (BIG_HEIGHT / 2);
+
+    (void)user;
+    memset(y, frame == 0 ? 0 : 255, luma);
+    memset(u, 128, chroma);
+    memset(v, 128, chroma);
+    return 0;
+}
+
+static int test_scene_cut_full_size(void)
+{
+    bink2_enc_source src;
+    bink2_enc_options options;
+    char err[256];
+
+    memset(&src, 0, sizeof(src));
+    src.width = BIG_WIDTH;
+    src.height = BIG_HEIGHT;
+    src.frame_count = 2;
+    src.fps_num = TEST_FPS;
+    src.fps_den = 1;
+    src.read_frame_yuv = read_flat;
+    bink2_enc_options_default(&options);
+    options.motion_range = 0;
+    CHECK(bink2_enc_encode(&src, &options, "test_rate_big.bk2", err,
+                           sizeof(err)) == BINK2_ENC_OK);
+    CHECK(index_is_key("test_rate_big.bk2", 1) == 1);
+    remove("test_rate_big.bk2");
+    return 0;
 }
 
 int main(void)
@@ -216,6 +266,14 @@ int main(void)
                         120) == 0);
     rate_size = file_size("test_rate_bitrate.bk2");
     target_size = 100.0 * 1024.0 * 120.0 / TEST_FPS;
+    CHECK(rate_size > target_size * 0.75 && rate_size < target_size * 1.25);
+
+    /* The same rate as 300000000/10000000 fps. bitrate * fps_den exceeds
+     * 32 bits, which wrapped the target where long is 32 bits. */
+    CHECK(encode_scaled("test_rate_scaled.bk2", "test_rate_scaled.yuv", 120,
+                        80, 100 * 1024 * 8, 150, -1, 10000000UL) ==
+          BINK2_ENC_OK);
+    rate_size = file_size("test_rate_scaled.bk2");
     CHECK(rate_size > target_size * 0.75 && rate_size < target_size * 1.25);
 
     /* Scene cut: the black frame becomes a keyframe. */
@@ -264,6 +322,10 @@ int main(void)
     remove("test_rate_high.yuv");
     remove("test_rate_bitrate.bk2");
     remove("test_rate_bitrate.yuv");
+    CHECK(test_scene_cut_full_size() == 0);
+
+    remove("test_rate_scaled.bk2");
+    remove("test_rate_scaled.yuv");
     remove("test_rate_scene.bk2");
     remove("test_rate_scene.yuv");
     remove("test_rate_extreme.bk2");

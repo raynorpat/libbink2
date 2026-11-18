@@ -6,6 +6,7 @@
 #include "bink2_enc_video.h"
 #include "bink2_video.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,7 +33,9 @@ static int valid_source(const bink2_enc_source *source)
         return 0;
     if (source->frame_count < 1 || source->frame_count > BINK2_ENC_MAX_FRAMES)
         return 0;
-    if (source->fps_num == 0 || source->fps_den == 0)
+    /* The header stores both as 32-bit fields. */
+    if (source->fps_num == 0 || source->fps_den == 0 ||
+        source->fps_num > 0xFFFFFFFFUL || source->fps_den > 0xFFFFFFFFUL)
         return 0;
     if (source->read_frame == NULL && source->read_frame_yuv == NULL)
         return 0;
@@ -255,11 +258,20 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
     if (frame_q > 36)
         frame_q = 36;
     if (options->target_bitrate > 0) {
+        /* 64-bit: bitrate * fps_den exceeds 32 bits at ordinary rates, and
+         * long is 32 bits on some platforms. Both factors are at most
+         * 32 bits, so the product fits. The cap keeps the rate-control
+         * multiples below (at most 5x) inside a 32-bit long. */
+        uint64_t target = (uint64_t)options->target_bitrate *
+                          (uint64_t)source->fps_den /
+                          ((uint64_t)source->fps_num * 8u);
+
         frame_q = 12;
-        target_bytes = (long)((options->target_bitrate * source->fps_den) /
-                              (source->fps_num * 8));
-        if (target_bytes < 1)
-            target_bytes = 1;
+        if (target < 1)
+            target = 1;
+        if (target > 0x0FFFFFFFu)
+            target = 0x0FFFFFFFu;
+        target_bytes = (long)target;
     }
 
     if (bink2_container_write_header(file, (unsigned long)source->width,
@@ -327,15 +339,15 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
             goto done;
         }
         if (f > 0) {
-            unsigned long sum = 0;
-            unsigned long i;
-            unsigned long count = (unsigned long)source->width *
-                                  (unsigned long)source->height;
+            /* Up to width * height * 255: more than 32 bits at the
+             * largest frame size. */
+            uint64_t sum = 0;
+            size_t i;
+            size_t count = (size_t)source->width * (size_t)source->height;
 
             for (i = 0; i < count; i++)
-                sum += (unsigned long)abs((int)frame.y[i] -
-                                          (int)previous[i]);
-            if (sum > count * 24)
+                sum += (uint64_t)abs((int)frame.y[i] - (int)previous[i]);
+            if (sum > (uint64_t)count * 24u)
                 scene_cut = 1;
         }
         memcpy(previous, frame.y,
@@ -505,7 +517,7 @@ bink2_enc_status bink2_enc_encode(const bink2_enc_source *source,
     }
     if (!valid_source(source)) {
         set_error(err, errlen, "invalid source dimensions, frame count, "
-                               "frame rate, or callbacks");
+                               "frame rate, audio fields, or callbacks");
         return BINK2_ENC_ERR_USAGE;
     }
     if (!valid_options(options)) {
