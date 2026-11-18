@@ -101,10 +101,12 @@ int bink2_enc_wav_load(const char *path, Bink2EncWav *wav, char *err,
             if (size < sizeof(fmt) || fread(fmt, 1, sizeof(fmt), file) !=
                                           sizeof(fmt)) {
                 fclose(file);
+                free(data);
                 return fail(err, errlen, "truncated WAV fmt chunk");
             }
             if (read_u16(fmt) != 1) {
                 fclose(file);
+                free(data);
                 return fail(err, errlen, "WAV must be PCM");
             }
             channels = read_u16(fmt + 2);

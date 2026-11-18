@@ -331,6 +331,56 @@ static int test_oversized_unknown_chunk(void)
     return 0;
 }
 
+/* A data chunk before a bad fmt chunk: the loader has already allocated the
+ * samples when it rejects the fmt chunk and must free them. The leak shows
+ * under LeakSanitizer or `leaks --atExit`. */
+static int expect_reject_raw(const unsigned char *bytes, size_t size)
+{
+    Bink2EncWav wav;
+    char err[128] = "";
+    FILE *file = fopen(TMP_WAV, "wb");
+
+    CHECK(file != NULL);
+    CHECK(fwrite(bytes, 1, size, file) == size);
+    CHECK(fclose(file) == 0);
+    memset(&wav, 0, sizeof(wav));
+    CHECK(bink2_enc_wav_load(TMP_WAV, &wav, err, sizeof(err)) == -1);
+    CHECK(err[0] != '\0');
+    CHECK(wav.pcm == NULL);
+    remove(TMP_WAV);
+    return 0;
+}
+
+static int test_data_before_bad_fmt(void)
+{
+    unsigned char bytes[12 + 12 + 24];
+    unsigned char *p = bytes;
+
+    memcpy(p, "RIFF", 4);
+    put32(p + 4, sizeof(bytes) - 8);
+    memcpy(p + 8, "WAVE", 4);
+    p += 12;
+    memcpy(p, "data", 4);
+    put32(p + 4, 4);
+    memset(p + 8, 0x11, 4);
+    p += 12;
+    memcpy(p, "fmt ", 4);
+    put32(p + 4, 16);
+    put16(p + 8, 3);            /* IEEE float: not PCM */
+    put16(p + 10, 1);
+    put32(p + 12, 44100);
+    put32(p + 16, 88200);
+    put16(p + 20, 2);
+    put16(p + 22, 16);
+    if (expect_reject_raw(bytes, sizeof(bytes)) != 0)
+        return 1;
+
+    /* The same layout with a fmt chunk too short to hold its fields. */
+    put32(bytes + 4, 12 + 12 + 16 - 8);
+    put32(bytes + 24 + 4, 8);
+    return expect_reject_raw(bytes, 12 + 12 + 16);
+}
+
 static int test_rejects(void)
 {
     static const unsigned char payload[16] = { 0 };
@@ -370,6 +420,7 @@ int main(void)
     CHECK(test_truncated_data() == 0);
     CHECK(test_second_fmt_ignored() == 0);
     CHECK(test_oversized_unknown_chunk() == 0);
+    CHECK(test_data_before_bad_fmt() == 0);
     CHECK(test_rejects() == 0);
     return 0;
 }
