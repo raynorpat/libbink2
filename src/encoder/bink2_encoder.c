@@ -212,6 +212,7 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
     unsigned long index_offset = 0;
     unsigned long largest = 0;
     unsigned long end = 0;
+    long offset_end;
     int heights[8] = { 0 };
     int slices;
     Bink2Frame frame;
@@ -445,7 +446,13 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
                     source->frame_count);
         bink2_bw_free(&bw);
     }
-    end = (unsigned long)ftell(file);
+    offset_end = ftell(file);
+    if (offset_end < 0) {
+        bink2_video_uninit(&state);
+        bink2_frame_free(&frame);
+        goto done;
+    }
+    end = (unsigned long)offset_end;
     offsets[source->frame_count] = end;
     if (bink2_container_patch_index(file, index_offset, offsets, keys,
                                     source->frame_count) != 0) {
