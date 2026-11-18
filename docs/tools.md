@@ -83,8 +83,8 @@ Exit codes match `bink2_enc_status`:
 | 3 | Encoding or writing failed |
 | 4 | `--verify` found a mismatch |
 
-The output is `KB2j` video with no audio. See [encoder.md](encoder.md) for
-what each option does to the bitstream.
+The output is `KB2j` video with an optional single audio track. See
+[encoder.md](encoder.md) for what each option does to the bitstream.
 
 ## bink2_dump
 
