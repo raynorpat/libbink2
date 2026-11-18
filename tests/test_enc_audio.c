@@ -142,8 +142,9 @@ static int decode_all(const Encoded *encoded, unsigned long rate, int channels,
         CHECK(bink2_audio_decode(decoder, encoded->payload[f],
                                  encoded->payload_size[f]) == 0);
         CHECK(bink2_audio_pcm_bytes(decoder) == encoded->pcm_bytes[f]);
-        memcpy((unsigned char *)pcm + at, bink2_audio_pcm(decoder),
-               encoded->pcm_bytes[f]);
+        if (encoded->pcm_bytes[f] != 0)
+            memcpy((unsigned char *)pcm + at, bink2_audio_pcm(decoder),
+                   encoded->pcm_bytes[f]);
         at += encoded->pcm_bytes[f];
     }
     bink2_audio_destroy(decoder);
@@ -528,6 +529,42 @@ static int test_bit_positions(void)
     return 0;
 }
 
+static int test_zero_blocks(void)
+{
+    unsigned long source_frames = 600;
+    short *pcm = make_sine(8000, source_frames, 1, 440.0, 0.5);
+    Encoded encoded;
+    short *decoded = NULL;
+    unsigned long decoded_frames = 0;
+    double snr;
+
+    CHECK(pcm != NULL);
+    if (encode_all(8000, 1, source_frames, pcm, 60, 1, 4, 80,
+                   &encoded) != 0) {
+        free(pcm);
+        return 1;
+    }
+    CHECK(encoded.payload[1] == NULL);
+    CHECK(encoded.payload_size[1] == 0);
+    CHECK(encoded.pcm_bytes[1] == 0);
+    CHECK(encoded.payload[2] == NULL);
+    CHECK(encoded.payload_size[2] == 0);
+    CHECK(encoded.pcm_bytes[2] == 0);
+    if (decode_all(&encoded, 8000, 1, &decoded, &decoded_frames) != 0) {
+        free(pcm);
+        free_encoded(&encoded);
+        return 1;
+    }
+    CHECK(decoded_frames == 960);
+    snr = snr_between(decoded, decoded_frames, pcm, source_frames, 1,
+                      overlap_for(8000));
+    CHECK(snr >= 25.0);
+    free(decoded);
+    free(pcm);
+    free_encoded(&encoded);
+    return 0;
+}
+
 int main(void)
 {
     CHECK(test_one_block() == 0);
@@ -539,5 +576,6 @@ int main(void)
     CHECK(test_silence_size() == 0);
     CHECK(test_full_scale_hf() == 0);
     CHECK(test_bit_positions() == 0);
+    CHECK(test_zero_blocks() == 0);
     return 0;
 }

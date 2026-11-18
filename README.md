@@ -14,12 +14,13 @@ The decoder and tools are implemented:
   syntax is ported; decoding them half-written would corrupt every plane.
 - Bink Audio 2, up to seven tracks.
 - Keyframe seeking and a 2 GB file ceiling.
-- `bink2_dump`, `bink2_build` (images to `.bk2`), and SDL players for the
-  renderer, OpenGL, Metal, and Vulkan, plus Direct3D 9/11 players on Windows.
+- `bink2_dump`, `bink2_build` (images to `.bk2`, optional WAV audio), and SDL
+  players for the renderer, OpenGL, Metal, and Vulkan, plus Direct3D 9/11
+  players on Windows.
 
 The encoder writes `KB2j` from RGB images (PPM, BMP, PNG, JPEG) or a YUV
-source and supports quality and target-bitrate modes; see `docs/encoder.md`.
-It does not write audio or alpha.
+source and supports quality and target-bitrate modes plus one optional
+Bink Audio 2 WAV track; see `docs/encoder.md`. It does not write alpha.
 
 The in-loop deblocking filter is not implemented on decode, matching the
 pinned FFmpeg reference; decoded output differs from RAD's decoder by a few

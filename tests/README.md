@@ -21,6 +21,21 @@ audio decoder can be compared with a one-LSB tolerance.
 `sc13_01_partial.bk2` is genuinely truncated: the header declares 499 frames
 but only frames 0–235 are complete. The golden array stops there.
 
+## Encoded audio oracle
+
+`test_enc_audio_oracle` encodes a short tone, decodes it with this library,
+decodes the same file with the pinned FFmpeg Bink 2 build, and requires the
+two PCM streams to match byte for byte. Point `BINK2_ORACLE` at the oracle
+binary:
+
+```sh
+BINK2_ORACLE="$PWD/build/oracle/FFmpeg-bink2/ffmpeg" \
+  ctest --test-dir build -R '^enc_audio_oracle$' --output-on-failure
+```
+
+Without `BINK2_ORACLE` the test reports `Skipped` (exit code 77). It writes
+temporary files in the current directory and removes them.
+
 The oracle does not implement Bink 2's in-loop deblocking filter, which is
 the documented correctness target for `libbink2`.
 

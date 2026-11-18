@@ -65,6 +65,14 @@ the last component of `<input>` with its extension replaced by `.bk2`:
 `shots/intro.png` and `shots/intro` both give `intro.bk2`. An input ending in
 a path separator, such as `frames/`, gives `out.bk2`.
 
+`--audio` adds one Bink Audio 2 DCT track from a PCM RIFF WAV: mono or stereo,
+8, 16, or 24-bit, at 1..65535 Hz. Float and ADPCM WAV are rejected. There is
+no resampling; the track keeps the WAV rate. Audio is truncated or padded with
+silence to the video duration, and `--audio-quality` scales the quantiser
+rather than targeting a bitrate. The audio is lossy; `--verify` checks that
+every chunk decodes and that the PCM lengths match, not that the samples match
+the WAV.
+
 Exit codes match `bink2_enc_status`:
 
 | Code | Meaning |

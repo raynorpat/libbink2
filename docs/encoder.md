@@ -1,14 +1,16 @@
 # libbink2 encoder
 
-`libbink2` encodes `KB2j` video: 8-bit YUV 4:2:0, no alpha, no audio. The
-encoder is a separate static library (`libbink2enc.a`, CMake target
-`bink2_encoder`) and is also exposed by the `bink2_build` command.
+`libbink2` encodes `KB2j` video: 8-bit YUV 4:2:0, no alpha, with an optional
+single Bink Audio 2 track. The encoder is a separate static library
+(`libbink2enc.a`, CMake target `bink2_encoder`) and is also exposed by the
+`bink2_build` command.
 
 ## Containers and frames
 
-The writer produces the `KB2j` container with the same 48-byte header and
-`(frame_count + 1)` word index as the decoder consumes. The index key bit and
-the frame flags are set together:
+The writer produces the `KB2j` container with the same 48-byte fixed header
+as the decoder consumes, followed by zero or one audio track descriptor and
+then the `(frame_count + 1)` word index. The index key bit and the frame flags
+are set together:
 
 - keyframe (intra) frames use video flags `0x76018` and write the row-CBP
   block;
@@ -63,6 +65,7 @@ and by the decoder are byte-identical.
 | `four_mv` | one or four vectors per macroblock |
 | `quality` | 0..100 in quality mode |
 | `target_bitrate` | bits per second; `0` selects quality mode |
+| `audio_quality` | 0..100 for the audio track; ignored without audio |
 | `verify` | decode the result after writing |
 | `recon_path` | tight raw YUV 4:2:0 reconstruction dump |
 | `verbose` | progress on stderr |
@@ -70,6 +73,23 @@ and by the decoder are byte-identical.
 `bink2_build` maps the same options to command-line flags and reads `.ppm`,
 `.bmp`, `.png`, `.jpg`, and `.jpeg` frames from a directory (natural sort) or
 a single image.
+
+## Audio
+
+One optional audio track is written as Bink Audio 2 with the DCT transform.
+Set `source.audio.channels` to 1 or 2, `source.audio.rate` to 1..65535 Hz, and
+`source.audio.sample_count` to the number of samples per channel, then supply
+`read_audio`. There is no resampling: the container stores the source rate.
+
+Audio runs for the video duration. Samples past the end are ignored, and a
+short track is padded with silence. `options.audio_quality` is 0..100 and
+scales the per-band quantiser; it does not target a bitrate.
+
+The audio output is lossy and is not compared byte for byte. `verify` decodes
+every audio chunk and requires its total PCM size to match the encoder's, and
+the tests compare the decoded signal with the source at a measured SNR.
+The block syntax and quantiser layout are documented in
+[audio-encoder-design.md](audio-encoder-design.md).
 
 ## Rate control
 
@@ -109,4 +129,10 @@ independent `bink2enc` and print both file sizes.
 
 `options.verify` decodes the just-written file with `libbink2` and compares
 every visible plane to the in-memory reconstruction, returning
-`BINK2_ENC_ERR_VERIFY` on a mismatch. `bink2_build --verify` uses it.
+`BINK2_ENC_ERR_VERIFY` on a mismatch. `bink2_build --verify` uses it. With
+audio, it also requires the decoded PCM byte count to equal the sum of the
+per-frame audio sizes.
+
+`test_enc_audio_oracle` compares the encoder's audio with the pinned FFmpeg
+Bink 2 decoder when `BINK2_ORACLE` points at that binary; otherwise it skips
+with exit code 77. It does not modify the golden checksums.

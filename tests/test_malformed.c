@@ -252,6 +252,57 @@ static int test_audio_overrun(void)
     return 0;
 }
 
+static int test_audio_truncated_prefix(void)
+{
+    unsigned char buf[4096];
+    unsigned char payload[3] = { 0x01, 0x02, 0x03 };
+    size_t size;
+    bink2 b;
+
+    size = build_video(buf, 64, 64, 1, payload, sizeof(payload));
+    b = bink2_open_memory(buf, (unsigned long)size);
+    CHECK(b != NULL);
+    CHECK(bink2_enable_video(b, 1) == 0);
+    CHECK(bink2_enable_audio(b, 0, 1) == 0);
+    CHECK(bink2_first(b) == BINK2_ERROR);
+    CHECK(bink2_get_audio_size(b, 0) == 0);
+    bink2_close(b);
+    return 0;
+}
+
+static int test_audio_reported_size_overrun(void)
+{
+    unsigned char buf[4096];
+    unsigned char payload[4];
+    size_t size;
+    bink2 b;
+
+    w32(payload, 0xFFFFFFFFUL);
+    size = build_video(buf, 64, 64, 1, payload, sizeof(payload));
+    b = bink2_open_memory(buf, (unsigned long)size);
+    CHECK(b != NULL);
+    CHECK(bink2_enable_video(b, 1) == 0);
+    CHECK(bink2_enable_audio(b, 0, 1) == 0);
+    CHECK(bink2_first(b) == BINK2_ERROR);
+    CHECK(bink2_get_audio_size(b, 0) == 0);
+    bink2_close(b);
+    return 0;
+}
+
+static int test_audio_zero_rate_descriptor(void)
+{
+    unsigned char buf[4096];
+    unsigned char payload[8] = { 0 };
+    size_t size;
+
+    size = build_video(buf, 64, 64, 1, payload, sizeof(payload));
+    buf[48] = 0;
+    buf[49] = 0;
+    buf[50] = 0;
+    CHECK(bink2_open_memory(buf, (unsigned long)size) == NULL);
+    return 0;
+}
+
 static int test_fuzz(void)
 {
     unsigned char buf[1024];
@@ -291,6 +342,9 @@ int main(void)
     CHECK(test_slice_offset() == 0);
     CHECK(test_seek_clamp() == 0);
     CHECK(test_audio_overrun() == 0);
+    CHECK(test_audio_truncated_prefix() == 0);
+    CHECK(test_audio_reported_size_overrun() == 0);
+    CHECK(test_audio_zero_rate_descriptor() == 0);
     CHECK(test_fuzz() == 0);
     return 0;
 }

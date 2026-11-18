@@ -7,6 +7,7 @@
 | [Architecture](architecture.md) | You are about to change library code. |
 | [Bink 2 format notes](bink2.md) | You need the container or bitstream layout. |
 | [Encoder internals](encoder.md) | You need to know how the encoder chooses modes, quantisers, and keyframes. |
+| [Audio encoder design](audio-encoder-design.md) | You are changing how audio is loaded, quantised, or written. |
 | [Test references](../tests/README.md) | You are regenerating golden checksums or working with the oracle. |
 | [Contributing](../CONTRIBUTING.md) | You are sending a change. |
 

@@ -163,9 +163,9 @@ macroblock and `0` otherwise. It returns `1` when the data is available.
 
 ## Encoder (`bink2_encoder.h`)
 
-The encoder writes a complete `KB2j` file in one call. It pulls frames from
-callbacks you provide. Output is 8-bit YUV 4:2:0 video only: no alpha and no
-audio.
+The encoder writes a complete `KB2j` file in one call. It pulls frames and
+optional audio from callbacks you provide. Video output is 8-bit YUV 4:2:0
+with no alpha; audio is one optional Bink Audio 2 track.
 
 ```c
 #include <bink2_encoder.h>
@@ -213,10 +213,18 @@ int encode(void *frames_ctx)
 | `fps_num`, `fps_den` | Both nonzero |
 | `read_frame` | Packed RGB24, top-down, `width*height*3` bytes |
 | `read_frame_yuv` | Tight Y, U, V planes (chroma `(width+1)/2` by `(height+1)/2`) |
+| `audio.rate` | 1..65535 Hz when audio is enabled |
+| `audio.channels` | 0 disables audio; 1 or 2 enables it |
+| `audio.sample_count` | Samples per channel; must be nonzero with audio |
+| `read_audio` | Interleaved host-endian s16 for the requested sample range; required with audio |
 | `user` | Passed back to the callbacks |
 
-Set at least one callback. Use `read_frame_yuv` when you already have YUV
-and want to avoid a colour conversion.
+Set at least one frame callback. Use `read_frame_yuv` when you already have
+YUV and want to avoid a colour conversion. `read_audio` fills
+`sample_count * channels` shorts starting at `start_sample` and returns 0, or
+nonzero on failure. It must be repeatable because the encoder may request the
+same range more than once. The encoder truncates or silence-pads the track to
+the video duration; it never resamples.
 
 ### Options
 
@@ -230,6 +238,7 @@ Always start from `bink2_enc_options_default()`.
 | `four_mv` | 1 | Allow four motion vectors per macroblock. |
 | `quality` | 80 | 0..100; used when `target_bitrate` is `0`. |
 | `target_bitrate` | 0 | Bits per second; nonzero selects bitrate mode. |
+| `audio_quality` | 80 | 0..100 for the audio track; ignored without audio. |
 | `verify` | 0 | Decode the written file and compare it to the encoder's reconstruction. |
 | `recon_path` | `NULL` | Write the reconstruction as tight raw YUV 4:2:0. |
 | `verbose` | 0 | Progress on `stderr`. |
@@ -240,7 +249,7 @@ Always start from `bink2_enc_options_default()`.
 | --- | --- | --- |
 | `BINK2_ENC_OK` | 0 | File written. |
 | `BINK2_ENC_ERR_USAGE` | 1 | `NULL` argument, or a source or option value out of range. |
-| `BINK2_ENC_ERR_INPUT` | 2 | A frame callback returned nonzero. |
+| `BINK2_ENC_ERR_INPUT` | 2 | A frame or audio callback returned nonzero, or audio setup failed. |
 | `BINK2_ENC_ERR_ENCODE` | 3 | The output could not be created or written, or encoding failed. |
 | `BINK2_ENC_ERR_VERIFY` | 4 | `verify` was set and the decoded file did not match. |
 

@@ -131,6 +131,23 @@ static unsigned long read_u32(const char *path, unsigned long offset)
     return value;
 }
 
+static int patch_u32(const char *path, unsigned long offset,
+                     unsigned long value)
+{
+    unsigned char bytes[4];
+    FILE *file = fopen(path, "rb+");
+
+    CHECK(file != NULL);
+    bytes[0] = (unsigned char)(value & 0xFF);
+    bytes[1] = (unsigned char)((value >> 8) & 0xFF);
+    bytes[2] = (unsigned char)((value >> 16) & 0xFF);
+    bytes[3] = (unsigned char)((value >> 24) & 0xFF);
+    CHECK(fseek(file, (long)offset, SEEK_SET) == 0);
+    CHECK(fwrite(bytes, 1, 4, file) == 4);
+    CHECK(fclose(file) == 0);
+    return 0;
+}
+
 static int test_audio_file(void)
 {
     const char *path = "test_enc_audio_file.bk2";
@@ -266,11 +283,37 @@ static int test_packet_sizes(void)
     return 0;
 }
 
+static int test_corrupt_report(void)
+{
+    const char *report_path = "test_enc_audio_report.bk2";
+    short *pcm = make_tone(4800);
+    unsigned long first;
+    bink2 b;
+
+    CHECK(pcm != NULL);
+    if (encode_file(report_path, pcm, 4800, 2, 1) != 0)
+        return 1;
+    first = read_u32(report_path, 60) & ~1UL;
+    CHECK(patch_u32(report_path, first + 4, 0xFFFFFFFFUL) == 0);
+    b = bink2_open_file(report_path, BINK2_MODE_DISK);
+    CHECK(b != NULL);
+    CHECK(bink2_enable_video(b, 1) == 0);
+    CHECK(bink2_enable_audio(b, 0, 1) == 0);
+    CHECK(bink2_first(b) != BINK2_ERROR);
+    /* The reported decoded size is informational; the blocks still decode. */
+    CHECK(bink2_get_audio_size(b, 0) == 1920UL * 2UL * 2UL);
+    bink2_close(b);
+    remove(report_path);
+    free(pcm);
+    return 0;
+}
+
 int main(void)
 {
     CHECK(test_audio_file() == 0);
     CHECK(test_short_wav_pads() == 0);
     CHECK(test_no_audio() == 0);
     CHECK(test_packet_sizes() == 0);
+    CHECK(test_corrupt_report() == 0);
     return 0;
 }
