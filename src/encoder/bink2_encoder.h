@@ -74,7 +74,8 @@ typedef struct {
     unsigned slices;            /* 2, 3, 4 or 8 */
     int four_mv;                /* allow four motion vectors per macroblock */
     int quality;                /* 0..100; higher is larger/better */
-    unsigned target_bitrate;    /* bits per second; 0 = quality mode */
+    unsigned target_bitrate;    /* video bits per second, excluding audio;
+                                   0 = quality mode */
     int audio_quality;          /* 0..100; higher is larger/better */
     int verify;                 /* round-trip through the decoder */
     const char *recon_path;     /* optional tight raw YUV 4:2:0 dump */

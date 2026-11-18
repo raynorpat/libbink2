@@ -49,7 +49,7 @@ build/bink2_build frames/ -o clip.bk2 --fps 30000/1001 --quality 85 --verify
 | `--motion-range N` | `8` | Motion search radius, 0..64. |
 | `--slices N` | `2` | Slices per frame: 2, 3, 4, or 8. |
 | `--quality N` | `80` | 0..100. Ignored when `--bitrate` is nonzero. |
-| `--bitrate N` | `0` | Target bits per second; `0` selects quality mode. |
+| `--bitrate N` | `0` | Target video bits per second, excluding audio; `0` selects quality mode. |
 | `--audio FILE` | off | Add one PCM WAV track. Mono or stereo, 8/16/24-bit. |
 | `--audio-quality N` | `80` | 0..100 audio quality; ignored without `--audio`. |
 | `--four-mv 0\|1` | `1` | Allow four motion vectors per macroblock. |

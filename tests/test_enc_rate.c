@@ -193,6 +193,89 @@ static int index_is_key(const char *path, unsigned long frame)
     return key;
 }
 
+static unsigned long le32_at(const unsigned char *p)
+{
+    return (unsigned long)p[0] | ((unsigned long)p[1] << 8) |
+           ((unsigned long)p[2] << 16) | ((unsigned long)p[3] << 24);
+}
+
+static int read_tone(void *user, unsigned long start, unsigned long count,
+                     short *dst)
+{
+    unsigned long i;
+
+    (void)user;
+    for (i = 0; i < count; i++) {
+        short s = (short)(12000.0 * sin((double)(start + i) * 0.05));
+
+        dst[i * 2] = s;
+        dst[i * 2 + 1] = s;
+    }
+    return 0;
+}
+
+/* target_bitrate counts video only: the video payloads land near the
+ * target and the audio chunks come on top. */
+static int test_bitrate_excludes_audio(void)
+{
+    SourceCtx ctx = { -1 };
+    bink2_enc_source src;
+    bink2_enc_options options;
+    char err[256];
+    FILE *file;
+    unsigned char *data;
+    long size;
+    unsigned long frames = 120;
+    unsigned long video = 0;
+    unsigned long audio = 0;
+    unsigned long f;
+    double target = 100.0 * 1024.0 * (double)frames / TEST_FPS;
+
+    memset(&src, 0, sizeof(src));
+    src.width = TEST_WIDTH;
+    src.height = TEST_HEIGHT;
+    src.frame_count = frames;
+    src.fps_num = TEST_FPS;
+    src.fps_den = 1;
+    src.read_frame_yuv = read_yuv;
+    src.user = &ctx;
+    src.audio.rate = 48000;
+    src.audio.channels = 2;
+    src.audio.sample_count = 48000UL * frames / TEST_FPS;
+    src.read_audio = read_tone;
+    bink2_enc_options_default(&options);
+    options.target_bitrate = 100 * 1024 * 8;
+    options.motion_range = 4;
+    CHECK(bink2_enc_encode(&src, &options, "test_rate_audio.bk2", err,
+                           sizeof(err)) == BINK2_ENC_OK);
+
+    size = file_size("test_rate_audio.bk2");
+    CHECK(size > 0);
+    data = (unsigned char *)malloc((size_t)size);
+    CHECK(data != NULL);
+    file = fopen("test_rate_audio.bk2", "rb");
+    CHECK(file != NULL);
+    CHECK(fread(data, 1, (size_t)size, file) == (size_t)size);
+    fclose(file);
+    /* One audio track: the index follows 48 + 12 header bytes. */
+    for (f = 0; f < frames; f++) {
+        unsigned long start = le32_at(data + 60 + 4 * f) & ~1UL;
+        unsigned long end = le32_at(data + 60 + 4 * (f + 1)) & ~1UL;
+        unsigned long chunk = le32_at(data + start);
+
+        CHECK(end > start + 4 + chunk && end <= (unsigned long)size);
+        audio += 4 + chunk;
+        video += end - start - 4 - chunk;
+    }
+    free(data);
+    remove("test_rate_audio.bk2");
+    /* Measured: video 1.05x and audio 0.25x the target. Counting audio
+     * would pull video to about 0.8x, below the 0.9 floor. */
+    CHECK(video > target * 0.9 && video < target * 1.25);
+    CHECK(audio > target * 0.15);
+    return 0;
+}
+
 /* At the largest size, a black-to-white cut sums 7680*4800*255 luma
  * differences: more than 32 bits. A wrapped sum fell below the threshold
  * and missed the cut where long is 32 bits. */
@@ -322,6 +405,7 @@ int main(void)
     remove("test_rate_high.yuv");
     remove("test_rate_bitrate.bk2");
     remove("test_rate_bitrate.yuv");
+    CHECK(test_bitrate_excludes_audio() == 0);
     CHECK(test_scene_cut_full_size() == 0);
 
     remove("test_rate_scaled.bk2");

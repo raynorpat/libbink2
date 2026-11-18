@@ -237,7 +237,7 @@ Always start from `bink2_enc_options_default()`.
 | `slices` | 2 | 2, 3, 4, or 8. |
 | `four_mv` | 1 | Allow four motion vectors per macroblock. |
 | `quality` | 80 | 0..100; used when `target_bitrate` is `0`. |
-| `target_bitrate` | 0 | Bits per second; nonzero selects bitrate mode. |
+| `target_bitrate` | 0 | Video bits per second; nonzero selects bitrate mode. Audio is not counted, so a file with audio is larger by the audio bitrate. |
 | `audio_quality` | 80 | 0..100 for the audio track; ignored without audio. |
 | `verify` | 0 | Decode the written file and compare it to the encoder's reconstruction. |
 | `recon_path` | `NULL` | Write the reconstruction as tight raw YUV 4:2:0. |

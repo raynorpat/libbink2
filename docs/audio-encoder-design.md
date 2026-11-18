@@ -155,8 +155,8 @@ video payload
 ```
 
 A frame with no audio writes a zero chunk length. `largest packet` includes
-the audio chunk and its length prefix, so bitrate control on video stays
-honest.
+the audio chunk and its length prefix. Rate control counts only the video
+payload, so `target_bitrate` excludes audio.
 
 Rate is stored as 24 bits. The oracle reads only 16 bits, so the encoder
 accepts rates 1..65535 and rejects anything higher.

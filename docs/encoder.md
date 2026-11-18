@@ -64,7 +64,7 @@ and by the decoder are byte-identical.
 | `motion_range` | luma search radius, 0..64; `0` forces skip copies |
 | `four_mv` | one or four vectors per macroblock |
 | `quality` | 0..100 in quality mode |
-| `target_bitrate` | bits per second; `0` selects quality mode |
+| `target_bitrate` | video bits per second, excluding audio; `0` selects quality mode |
 | `audio_quality` | 0..100 for the audio track; ignored without audio |
 | `verify` | decode the result after writing |
 | `recon_path` | tight raw YUV 4:2:0 reconstruction dump |
@@ -97,7 +97,9 @@ The block syntax and quantiser layout are documented in
 
 Quality mode maps quality to a base quantiser (`q = 8 + (100-quality)/5`,
 clamped 1..36). Target-bitrate mode starts at `q = 12` and adjusts it by 1..3
-per frame toward `target_bitrate * fps_den / (fps_num * 8)` bytes. A frame
+per frame toward `target_bitrate * fps_den / (fps_num * 8)` bytes of video
+payload. Audio chunks are not counted, so audio adds its own bitrate on top
+of the target. A frame
 whose mean luma SAD against the previous source frame exceeds 24 is marked a
 scene cut and coded as a keyframe, with the index bit and frame flags kept in
 sync.
