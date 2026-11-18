@@ -97,6 +97,7 @@ void bink2_bw_init(Bink2BitWriter *bw)
     bw->data = NULL;
     bw->capacity = 0;
     bw->bitpos = 0;
+    bw->failed = 0;
 }
 
 void bink2_bw_free(Bink2BitWriter *bw)
@@ -107,11 +108,13 @@ void bink2_bw_free(Bink2BitWriter *bw)
     bw->data = NULL;
     bw->capacity = 0;
     bw->bitpos = 0;
+    bw->failed = 0;
 }
 
 void bink2_bw_reset(Bink2BitWriter *bw)
 {
     bw->bitpos = 0;
+    bw->failed = 0;
     if (bw->data != NULL && bw->capacity > 0)
         memset(bw->data, 0, bw->capacity);
 }
@@ -143,12 +146,18 @@ int bink2_bw_put(Bink2BitWriter *bw, unsigned value, int count)
 {
     int i;
 
-    if (bw == NULL || count < 0 || count > 32)
+    if (bw == NULL || bw->failed)
         return -1;
+    if (count < 0 || count > 32) {
+        bw->failed = 1;
+        return -1;
+    }
     if (count == 0)
         return 0;
-    if (bink2_bw_ensure(bw, bw->bitpos + (size_t)count) != 0)
+    if (bink2_bw_ensure(bw, bw->bitpos + (size_t)count) != 0) {
+        bw->failed = 1;
         return -1;
+    }
     for (i = 0; i < count; i++) {
         size_t pos = bw->bitpos + (size_t)i;
 
@@ -164,13 +173,20 @@ int bink2_bw_align32(Bink2BitWriter *bw)
 {
     size_t next;
 
-    if (bw == NULL)
+    if (bw == NULL || bw->failed)
         return -1;
     next = (bw->bitpos + 31) & ~(size_t)31;
-    if (bink2_bw_ensure(bw, next) != 0)
+    if (bink2_bw_ensure(bw, next) != 0) {
+        bw->failed = 1;
         return -1;
+    }
     bw->bitpos = next;
     return 0;
+}
+
+int bink2_bw_failed(const Bink2BitWriter *bw)
+{
+    return bw == NULL || bw->failed;
 }
 
 size_t bink2_bw_bitpos(const Bink2BitWriter *bw)

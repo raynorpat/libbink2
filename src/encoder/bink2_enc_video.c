@@ -738,6 +738,9 @@ int bink2_enc_encode_frame(Bink2BitWriter *bw, Bink2Frame *frame,
                                four_mv, q, stats);
     }
     bink2_bw_align32(bw);
+    /* Every write above goes through bw; one check covers them all. */
+    if (bink2_bw_failed(bw))
+        return -1;
     for (s = 1; s < slices; s++)
         put_le32(bw->data + 4 + 4 * (s - 1), offsets[s]);
     copy_reconstruction(frame, v);

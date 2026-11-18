@@ -58,6 +58,27 @@ static int test_failed_stays_failed(void)
     return 0;
 }
 
+/* A failed write leaves the position where it was, so later writes would
+ * build a stream with a hole in it. The writer stays failed until reset. */
+static int test_writer_failure_sticks(void)
+{
+    Bink2BitWriter bw;
+
+    bink2_bw_init(&bw);
+    CHECK(!bink2_bw_failed(&bw));
+    CHECK(bink2_bw_put(&bw, 1, 3) == 0);
+    CHECK(bink2_bw_put(&bw, 0, 33) == -1);
+    CHECK(bink2_bw_failed(&bw));
+    CHECK(bink2_bw_put(&bw, 1, 1) == -1);
+    CHECK(bink2_bw_align32(&bw) == -1);
+    CHECK(bink2_bw_bitpos(&bw) == 3);
+    bink2_bw_reset(&bw);
+    CHECK(!bink2_bw_failed(&bw));
+    CHECK(bink2_bw_put(&bw, 1, 1) == 0);
+    bink2_bw_free(&bw);
+    return 0;
+}
+
 static int test_writer_roundtrip(void)
 {
     Bink2BitWriter bw;
@@ -110,6 +131,7 @@ int main(void)
 {
     CHECK(test_bitreader() == 0);
     CHECK(test_failed_stays_failed() == 0);
+    CHECK(test_writer_failure_sticks() == 0);
     CHECK(test_writer_roundtrip() == 0);
     CHECK(test_writer_wrap() == 0);
     CHECK(test_unary() == 0);

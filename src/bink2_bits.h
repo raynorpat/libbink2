@@ -34,15 +34,21 @@ typedef struct {
     unsigned char *data;
     size_t capacity;
     size_t bitpos;
+    int failed;
 } Bink2BitWriter;
 
 void bink2_bw_init(Bink2BitWriter *bw);
 void bink2_bw_free(Bink2BitWriter *bw);
 void bink2_bw_reset(Bink2BitWriter *bw);
-/** Write the low count bits of value, LSB first. count is 0..32. */
+/**
+ * Write the low count bits of value, LSB first. count is 0..32. A failed
+ * write marks the writer failed, and every later write fails until
+ * bink2_bw_reset, so a caller can check bink2_bw_failed once at the end.
+ */
 int bink2_bw_put(Bink2BitWriter *bw, unsigned value, int count);
 /** Pad with zero bits up to the next 32-bit boundary. */
 int bink2_bw_align32(Bink2BitWriter *bw);
+int bink2_bw_failed(const Bink2BitWriter *bw);
 size_t bink2_bw_bitpos(const Bink2BitWriter *bw);
 size_t bink2_bw_bytes(const Bink2BitWriter *bw);
 const unsigned char *bink2_bw_data(const Bink2BitWriter *bw);
