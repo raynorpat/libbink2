@@ -50,6 +50,8 @@ build/bink2_build frames/ -o clip.bk2 --fps 30000/1001 --quality 85 --verify
 | `--slices N` | `2` | Slices per frame: 2, 3, 4, or 8. |
 | `--quality N` | `80` | 0..100. Ignored when `--bitrate` is nonzero. |
 | `--bitrate N` | `0` | Target bits per second; `0` selects quality mode. |
+| `--audio FILE` | off | Add one PCM WAV track. Mono or stereo, 8/16/24-bit. |
+| `--audio-quality N` | `80` | 0..100 audio quality; ignored without `--audio`. |
 | `--four-mv 0\|1` | `1` | Allow four motion vectors per macroblock. |
 | `--recon FILE` | off | Write the encoder's reconstruction as raw YUV 4:2:0. |
 | `--verify` | off | Decode the result and compare it with the reconstruction. |

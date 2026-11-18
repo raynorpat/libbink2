@@ -11,6 +11,7 @@
 #include "bink2.h"
 #include "bink2_encoder.h"
 #include "bink2_enc_image.h"
+#include "bink2_enc_wav.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -46,6 +47,8 @@ static void usage(FILE *out, const char *program)
         "      --slices N          slices per frame: 2, 3, 4 or 8 (default 2)\n"
         "      --quality N         0..100 (default 80)\n"
         "      --bitrate N         target bits per second (default 0 = quality mode)\n"
+        "      --audio FILE        add one PCM WAV track (mono/stereo, 8/16/24-bit)\n"
+        "      --audio-quality N   0..100 (default 80)\n"
         "      --four-mv 0|1       four motion vectors per macroblock (default 1)\n"
         "      --recon FILE        write the encoder reconstruction as raw YUV 4:2:0\n"
         "      --verify            decode the result and check it is readable\n"
@@ -369,14 +372,18 @@ static void input_close(build_input *input)
     memset(input, 0, sizeof(*input));
 }
 
+typedef struct {
+    build_input input;
+    Bink2EncWav wav;
+} build_media;
+
 static int input_read_frame(void *user, unsigned long index, unsigned char *rgb)
 {
-    build_input *input = (build_input *)user;
+    build_media *media = (build_media *)user;
+    build_input *input = &media->input;
     unsigned char *loaded = NULL;
     unsigned width = 0;
-    unsigned height = 0;
-
-    if (input == NULL || rgb == NULL || index >= input->count)
+    unsigned height = 0;    if (input == NULL || rgb == NULL || index >= input->count)
         return -1;
     if (bink2_enc_image_load(input->paths[index], &loaded, &width,
                              &height) != 0)
@@ -387,6 +394,23 @@ static int input_read_frame(void *user, unsigned long index, unsigned char *rgb)
     }
     memcpy(rgb, loaded, (size_t)width * height * 3);
     free(loaded);
+    return 0;
+}
+
+static int input_read_audio(void *user, unsigned long start,
+                            unsigned long count, short *dst)
+{
+    build_media *media = (build_media *)user;
+    const Bink2EncWav *wav = &media->wav;
+    unsigned long i;
+
+    memset(dst, 0, (size_t)count * (size_t)wav->channels * sizeof(short));
+    if (wav->pcm == NULL || start >= wav->sample_count)
+        return 0;
+    if (start + count > wav->sample_count)
+        count = wav->sample_count - start;
+    for (i = 0; i < count * (unsigned long)wav->channels; i++)
+        dst[i] = wav->pcm[start * (unsigned long)wav->channels + i];
     return 0;
 }
 
@@ -448,8 +472,10 @@ int main(int argc, char **argv)
     bink2_enc_options options;
     bink2_enc_source source;
     bink2_enc_status status;
-    build_input input;
+    build_media media;
+    build_input *input = &media.input;
     const char *image_input = NULL;
+    const char *audio_input = NULL;
     const char *output = NULL;
     const char *recon = NULL;
     char output_buffer[4096];
@@ -462,7 +488,7 @@ int main(int argc, char **argv)
 
     bink2_enc_options_default(&options);
     options.motion_range = 8;
-    memset(&input, 0, sizeof(input));
+    memset(&media, 0, sizeof(media));
     memset(&source, 0, sizeof(source));
     err[0] = '\0';
 
@@ -506,6 +532,16 @@ int main(int argc, char **argv)
             if (++i >= argc ||
                 parse_uint(argv[i], &options.target_bitrate) != 0)
                 return usage_error(argv[0], "--bitrate expects bits per second");
+        } else if (strcmp(arg, "--audio") == 0) {
+            if (++i >= argc)
+                return usage_error(argv[0], "--audio needs a value");
+            audio_input = argv[i];
+        } else if (strcmp(arg, "--audio-quality") == 0) {
+            unsigned value;
+
+            if (++i >= argc || parse_uint(argv[i], &value) != 0 || value > 100)
+                return usage_error(argv[0], "--audio-quality expects 0..100");
+            options.audio_quality = (int)value;
         } else if (strcmp(arg, "--four-mv") == 0) {
             unsigned value;
 
@@ -543,16 +579,32 @@ int main(int argc, char **argv)
         output = output_buffer;
     }
 
-    if (input_open(image_input, path_is_dir(image_input), &input) != 0) {
+    if (input_open(image_input, path_is_dir(image_input), input) != 0) {
         fprintf(stderr, "bink2_build: cannot read image input\n");
-        input_close(&input);
+        input_close(input);
         return BINK2_ENC_ERR_INPUT;
     }
 
-    source.user = &input;
-    source.width = input.width;
-    source.height = input.height;
-    source.frame_count = input.count;
+    if (audio_input != NULL) {
+        char audio_err[256] = "";
+
+        if (bink2_enc_wav_load(audio_input, &media.wav, audio_err,
+                               sizeof(audio_err)) != 0) {
+            fprintf(stderr, "bink2_build: %s\n",
+                    audio_err[0] != '\0' ? audio_err : "cannot read WAV");
+            input_close(input);
+            return BINK2_ENC_ERR_INPUT;
+        }
+        source.audio.rate = media.wav.rate;
+        source.audio.channels = media.wav.channels;
+        source.audio.sample_count = media.wav.sample_count;
+        source.read_audio = input_read_audio;
+    }
+
+    source.user = &media;
+    source.width = input->width;
+    source.height = input->height;
+    source.frame_count = input->count;
     source.fps_num = fps_num;
     source.fps_den = fps_den;
     source.read_frame = input_read_frame;
@@ -566,11 +618,13 @@ int main(int argc, char **argv)
     if (status != BINK2_ENC_OK) {
         if (err[0] != '\0')
             fprintf(stderr, "bink2_build: %s\n", err);
-        input_close(&input);
+        bink2_enc_wav_free(&media.wav);
+        input_close(input);
         return status;
     }
     if (verbose)
         fprintf(stderr, "bink2_build: wrote %s\n", output);
-    input_close(&input);
+    bink2_enc_wav_free(&media.wav);
+    input_close(input);
     return BINK2_ENC_OK;
 }
