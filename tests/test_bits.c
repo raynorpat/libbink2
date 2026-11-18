@@ -50,7 +50,7 @@ static int test_failed_stays_failed(void)
     CHECK(bink2_bits_left(&bits) == 0);
     CHECK(bink2_bits_read1(&bits) == -1);
 
-    /* A skip past the end still clamps to the end, as before. */
+    /* A skip past the end clamps to the end without failing. */
     bink2_bits_init(&bits, data, sizeof(data));
     bink2_bits_skip(&bits, 1000);
     CHECK(!bink2_bits_failed(&bits));

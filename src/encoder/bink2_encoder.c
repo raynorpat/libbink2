@@ -258,10 +258,9 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
     if (frame_q > 36)
         frame_q = 36;
     if (options->target_bitrate > 0) {
-        /* 64-bit: bitrate * fps_den exceeds 32 bits at ordinary rates, and
-         * long is 32 bits on some platforms. Both factors are at most
-         * 32 bits, so the product fits. The cap keeps the rate-control
-         * multiples below (at most 5x) inside a 32-bit long. */
+        /* bitrate * fps_den overflows a 32-bit long at ordinary rates;
+         * both factors are at most 32 bits, so 64 bits hold it. The cap
+         * keeps the 5x multiples below inside a 32-bit long. */
         uint64_t target = (uint64_t)options->target_bitrate *
                           (uint64_t)source->fps_den /
                           ((uint64_t)source->fps_num * 8u);

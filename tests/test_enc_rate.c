@@ -351,7 +351,7 @@ int main(void)
     target_size = 100.0 * 1024.0 * 120.0 / TEST_FPS;
     CHECK(rate_size > target_size * 0.75 && rate_size < target_size * 1.25);
 
-    /* The same rate as 300000000/10000000 fps. bitrate * fps_den exceeds
+    /* 30 fps written as 300000000/10000000: bitrate * fps_den exceeds
      * 32 bits, which wrapped the target where long is 32 bits. */
     CHECK(encode_scaled("test_rate_scaled.bk2", "test_rate_scaled.yuv", 120,
                         80, 100 * 1024 * 8, 150, -1, 10000000UL) ==
@@ -367,6 +367,9 @@ int main(void)
     CHECK(index_is_key("test_rate_scene.bk2", 0) == 1);
     CHECK(index_is_key("test_rate_scene.bk2", 59) == 0);
     CHECK(index_is_key("test_rate_scene.bk2", 60) == 1);
+
+    CHECK(test_bitrate_excludes_audio() == 0);
+    CHECK(test_scene_cut_full_size() == 0);
 
     /* Extremes must still decode. */
     {
@@ -405,9 +408,6 @@ int main(void)
     remove("test_rate_high.yuv");
     remove("test_rate_bitrate.bk2");
     remove("test_rate_bitrate.yuv");
-    CHECK(test_bitrate_excludes_audio() == 0);
-    CHECK(test_scene_cut_full_size() == 0);
-
     remove("test_rate_scaled.bk2");
     remove("test_rate_scaled.yuv");
     remove("test_rate_scene.bk2");
