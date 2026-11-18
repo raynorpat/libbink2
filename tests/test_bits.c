@@ -32,6 +32,32 @@ static int test_bitreader(void)
     return 0;
 }
 
+/* The video readers mark a failed reader by setting bitpos to SIZE_MAX.
+ * Skipping or aligning must not wrap that back to a readable position. */
+static int test_failed_stays_failed(void)
+{
+    static const unsigned char data[8] = {0};
+    Bink2Bits bits;
+
+    bink2_bits_init(&bits, data, sizeof(data));
+    bits.bitpos = (size_t)-1;
+    CHECK(bink2_bits_failed(&bits));
+    bink2_bits_skip(&bits, 1);
+    CHECK(bink2_bits_failed(&bits));
+    CHECK(bink2_bits_left(&bits) == 0);
+    bink2_bits_align32(&bits);
+    CHECK(bink2_bits_failed(&bits));
+    CHECK(bink2_bits_left(&bits) == 0);
+    CHECK(bink2_bits_read1(&bits) == -1);
+
+    /* A skip past the end still clamps to the end, as before. */
+    bink2_bits_init(&bits, data, sizeof(data));
+    bink2_bits_skip(&bits, 1000);
+    CHECK(!bink2_bits_failed(&bits));
+    CHECK(bink2_bits_left(&bits) == 0);
+    return 0;
+}
+
 static int test_writer_roundtrip(void)
 {
     Bink2BitWriter bw;
@@ -83,6 +109,7 @@ static int test_unary(void)
 int main(void)
 {
     CHECK(test_bitreader() == 0);
+    CHECK(test_failed_stays_failed() == 0);
     CHECK(test_writer_roundtrip() == 0);
     CHECK(test_writer_wrap() == 0);
     CHECK(test_unary() == 0);

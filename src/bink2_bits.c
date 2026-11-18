@@ -73,7 +73,9 @@ void bink2_bits_skip(Bink2Bits *bits, int count)
     size_t total = bits->size * 8;
     size_t next;
 
-    if (count < 0)
+    /* A failed reader (bitpos past the end) stays failed; adding to it
+     * could wrap it back to a readable position. */
+    if (count < 0 || bits->bitpos > total)
         return;
     next = bits->bitpos + (size_t)count;
     bits->bitpos = (next > total) ? total : next;
@@ -82,8 +84,11 @@ void bink2_bits_skip(Bink2Bits *bits, int count)
 void bink2_bits_align32(Bink2Bits *bits)
 {
     size_t total = bits->size * 8;
-    size_t next = (bits->bitpos + 31) & ~(size_t)31;
+    size_t next;
 
+    if (bits->bitpos > total)
+        return;
+    next = (bits->bitpos + 31) & ~(size_t)31;
     bits->bitpos = (next > total) ? total : next;
 }
 
