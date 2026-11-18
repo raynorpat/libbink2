@@ -153,7 +153,7 @@ int bink2_enc_wav_load(const char *path, Bink2EncWav *wav, char *err,
     }
     if (bits == 8) {
         for (i = 0; i < total; i++)
-            pcm[i] = (short)(((int)data[i] - 128) << 8);
+            pcm[i] = (short)(((int)data[i] - 128) * 256);
     } else if (bits == 16) {
         for (i = 0; i < total; i++) {
             int value = (int)data[i * 2] | ((int)data[i * 2 + 1] << 8);
