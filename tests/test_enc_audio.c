@@ -102,8 +102,7 @@ static int encode_all(unsigned long rate, int channels,
     out->frames = frames;
     for (f = 0; f < frames; f++)
         CHECK(bink2_enc_audio_frame(out->audio, read_audio, &source,
-                                    f + 1 == frames, &out->payload[f],
-                                    &out->payload_size[f],
+                                    &out->payload[f], &out->payload_size[f],
                                     &out->pcm_bytes[f]) == 0);
     return 0;
 }

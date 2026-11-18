@@ -2,7 +2,6 @@
 #include "bink2_enc_audio.h"
 #include "bink2_enc_container.h"
 #include "bink2_enc_internal.h"
-#include "bink2_enc_motion.h"
 #include "bink2_enc_video.h"
 #include "bink2_video.h"
 
@@ -375,9 +374,8 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
         audio_pcm_bytes = 0;
         if (audio != NULL) {
             int audio_status = bink2_enc_audio_frame(
-                audio, source->read_audio, source->user,
-                f + 1 == source->frame_count, &audio_payload, &audio_size,
-                &audio_pcm_bytes);
+                audio, source->read_audio, source->user, &audio_payload,
+                &audio_size, &audio_pcm_bytes);
 
             if (audio_status != 0) {
                 if (audio_status == BINK2_ENC_AUDIO_INPUT)

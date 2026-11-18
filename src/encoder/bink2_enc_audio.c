@@ -512,7 +512,7 @@ int bink2_enc_audio_frame(Bink2EncAudio *audio,
                                             unsigned long start_sample,
                                             unsigned long sample_count,
                                             short *dst),
-                          void *user, int is_last,
+                          void *user,
                           unsigned char **payload, size_t *payload_size,
                           size_t *pcm_bytes)
 {
@@ -521,7 +521,6 @@ int bink2_enc_audio_frame(Bink2EncAudio *audio,
     size_t pcm;
     int block;
 
-    (void)is_last;
     if (audio == NULL || read_audio == NULL || payload == NULL ||
         payload_size == NULL || pcm_bytes == NULL)
         return -1;
