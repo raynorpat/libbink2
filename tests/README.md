@@ -25,8 +25,9 @@ but only frames 0–235 are complete. The golden array stops there.
 
 `test_enc_audio_oracle` encodes a short tone, decodes it with this library,
 decodes the same file with the pinned FFmpeg Bink 2 build, and requires the
-two PCM streams to match byte for byte. Point `BINK2_ORACLE` at the oracle
-binary:
+two PCM streams to differ by at most one LSB (the two decoders' float and
+double transforms round some samples differently). Point `BINK2_ORACLE` at
+the oracle binary:
 
 ```sh
 BINK2_ORACLE="$PWD/build/oracle/FFmpeg-bink2/ffmpeg" \

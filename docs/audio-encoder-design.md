@@ -296,9 +296,10 @@ does not require audio to match the source, because the transform is lossy.
    then open the result and verify track metadata and decoded audio.
 9. `test_enc_audio_oracle` (optional, skips with 77 when `BINK2_ORACLE` is
    unset): encode a short clip with audio, decode it with this library, decode
-   it with the pinned FFmpeg Bink 2 build, and compare the two PCM streams
-   byte for byte. Both must agree; the SNR against the source is reported.
-   This does not modify `reference_checksums.h`.
+   it with the pinned FFmpeg Bink 2 build, and compare the two PCM streams.
+   The two transforms round some samples differently, so the test allows at
+   most a one-LSB difference and reports the SNR against the source. This does
+   not modify `reference_checksums.h`.
 
 No reference checksum is regenerated, and no binary audio fixture is added.
 

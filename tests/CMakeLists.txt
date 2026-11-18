@@ -94,6 +94,11 @@ if(TARGET bink2_encoder)
   target_link_libraries(test_enc_audio_file PRIVATE bink2_encoder)
   add_test(NAME enc_audio_file COMMAND test_enc_audio_file)
 
+  add_executable(test_enc_audio_oracle test_enc_audio_oracle.c)
+  target_link_libraries(test_enc_audio_oracle PRIVATE bink2_encoder)
+  add_test(NAME enc_audio_oracle COMMAND test_enc_audio_oracle)
+  set_tests_properties(enc_audio_oracle PROPERTIES SKIP_RETURN_CODE 77)
+
   add_executable(test_enc_image test_enc_image.c)
   target_link_libraries(test_enc_image PRIVATE bink2_encoder)
   target_compile_definitions(test_enc_image PRIVATE
