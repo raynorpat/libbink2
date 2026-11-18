@@ -35,9 +35,23 @@ typedef enum {
 } bink2_enc_status;
 
 /**
+ * One audio track. `sample_count` is per channel. `channels == 0` disables
+ * audio.
+ */
+typedef struct {
+    unsigned long rate;
+    int channels;
+    unsigned long sample_count;
+} bink2_enc_audio;
+
+/**
  * Frame source. Supply either `read_frame` (packed RGB24, width*height*3
  * bytes, top-down) or `read_frame_yuv` (tight Y, then U, then V planes), or
  * both. Returning nonzero from a callback reports a read failure.
+ *
+ * When `audio.channels` is nonzero, `read_audio` fills `sample_count * 2`
+ * bytes of interleaved host-endian signed 16-bit PCM for the sample range.
+ * It must be repeatable.
  */
 typedef struct {
     int width;
@@ -45,9 +59,12 @@ typedef struct {
     unsigned long frame_count;
     unsigned long fps_num;
     unsigned long fps_den;
+    bink2_enc_audio audio;
     int (*read_frame)(void *user, unsigned long frame, unsigned char *dst);
     int (*read_frame_yuv)(void *user, unsigned long frame, unsigned char *y,
                           unsigned char *u, unsigned char *v);
+    int (*read_audio)(void *user, unsigned long start_sample,
+                      unsigned long sample_count, short *dst);
     void *user;
 } bink2_enc_source;
 
@@ -58,6 +75,7 @@ typedef struct {
     int four_mv;                /* allow four motion vectors per macroblock */
     int quality;                /* 0..100; higher is larger/better */
     unsigned target_bitrate;    /* bits per second; 0 = quality mode */
+    int audio_quality;          /* 0..100; higher is larger/better */
     int verify;                 /* round-trip through the decoder */
     const char *recon_path;     /* optional tight raw YUV 4:2:0 dump */
     int verbose;                /* progress on stderr */

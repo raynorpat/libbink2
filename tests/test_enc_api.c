@@ -20,6 +20,16 @@ static int read_yuv(void *user, unsigned long frame, unsigned char *y,
     return 0;
 }
 
+static int read_audio(void *user, unsigned long start, unsigned long count,
+                      short *dst)
+{
+    (void)user;
+    (void)start;
+    (void)count;
+    (void)dst;
+    return 0;
+}
+
 static void valid_source(bink2_enc_source *src)
 {
     memset(src, 0, sizeof(*src));
@@ -43,6 +53,7 @@ static int test_defaults(void)
     CHECK(o.four_mv == 1);
     CHECK(o.quality == 80);
     CHECK(o.target_bitrate == 0);
+    CHECK(o.audio_quality == 80);
     CHECK(o.verify == 0);
     CHECK(o.recon_path == NULL);
     CHECK(o.verbose == 0);
@@ -108,6 +119,41 @@ static int test_usage_rejects(void)
     REJECT_OPT(motion_range, 65);
     REJECT_OPT(quality, -1);
     REJECT_OPT(quality, 101);
+    REJECT_OPT(audio_quality, -1);
+    REJECT_OPT(audio_quality, 101);
+
+    valid_source(&src);
+    src.audio.channels = 3;
+    err[0] = '\0';
+    CHECK(bink2_enc_encode(&src, &o, "x.bk2", err, sizeof(err)) ==
+          BINK2_ENC_ERR_USAGE);
+    CHECK(err[0] != '\0');
+
+    valid_source(&src);
+    src.audio.channels = 1;
+    src.audio.rate = 0;
+    src.audio.sample_count = 1000;
+    src.read_audio = read_audio;
+    err[0] = '\0';
+    CHECK(bink2_enc_encode(&src, &o, "x.bk2", err, sizeof(err)) ==
+          BINK2_ENC_ERR_USAGE);
+
+    valid_source(&src);
+    src.audio.channels = 1;
+    src.audio.rate = 48000;
+    src.audio.sample_count = 0;
+    src.read_audio = read_audio;
+    err[0] = '\0';
+    CHECK(bink2_enc_encode(&src, &o, "x.bk2", err, sizeof(err)) ==
+          BINK2_ENC_ERR_USAGE);
+
+    valid_source(&src);
+    src.audio.channels = 1;
+    src.audio.rate = 48000;
+    src.audio.sample_count = 1000;
+    err[0] = '\0';
+    CHECK(bink2_enc_encode(&src, &o, "x.bk2", err, sizeof(err)) ==
+          BINK2_ENC_ERR_USAGE);
 
     return 0;
 }

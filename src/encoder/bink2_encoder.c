@@ -1,4 +1,5 @@
 #include "bink2_encoder.h"
+#include "bink2_enc_audio.h"
 #include "bink2_enc_container.h"
 #include "bink2_enc_internal.h"
 #include "bink2_enc_motion.h"
@@ -35,6 +36,16 @@ static int valid_source(const bink2_enc_source *source)
         return 0;
     if (source->read_frame == NULL && source->read_frame_yuv == NULL)
         return 0;
+    if (source->audio.channels < 0 || source->audio.channels > 2)
+        return 0;
+    if (source->audio.channels != 0) {
+        if (source->audio.rate == 0 || source->audio.rate > 65535)
+            return 0;
+        if (source->audio.sample_count == 0)
+            return 0;
+        if (source->read_audio == NULL)
+            return 0;
+    }
     return 1;
 }
 
@@ -49,6 +60,8 @@ static int valid_options(const bink2_enc_options *options)
         return 0;
     if (options->quality < 0 || options->quality > 100)
         return 0;
+    if (options->audio_quality < 0 || options->audio_quality > 100)
+        return 0;
     return 1;
 }
 
@@ -62,6 +75,7 @@ void bink2_enc_options_default(bink2_enc_options *options)
     options->four_mv = 1;
     options->quality = 80;
     options->target_bitrate = 0;
+    options->audio_quality = 80;
     options->verify = 0;
     options->recon_path = NULL;
     options->verbose = 0;
@@ -114,7 +128,8 @@ static int write_recon(FILE *file, const Bink2Frame *frame)
 }
 
 static int verify_written(FILE *file, FILE *recon, int width, int height,
-                          unsigned long frames)
+                          unsigned long frames, int audio_channels,
+                          unsigned long audio_rate, unsigned long expected_pcm)
 {
     bink2 b;
     unsigned char *ref;
@@ -123,6 +138,7 @@ static int verify_written(FILE *file, FILE *recon, int width, int height,
     size_t y_size = (size_t)width * height;
     size_t c_size = (size_t)cw * ch;
     unsigned long f;
+    unsigned long decoded_audio = 0;
     int ok = 1;
 
     ref = (unsigned char *)malloc(y_size + c_size * 2);
@@ -134,12 +150,30 @@ static int verify_written(FILE *file, FILE *recon, int width, int height,
         return -1;
     }
     bink2_enable_video(b, 1);
+    if (audio_channels != 0) {
+        unsigned char mask = 0;
+        unsigned char channels[7] = { 0 };
+        unsigned char depths[7] = { 0 };
+        unsigned long rates[7] = { 0 };
+
+        if (bink2_info_audio(b, &mask, channels, depths, rates) != 0 ||
+            (mask & 1) == 0 || channels[0] != audio_channels ||
+            rates[0] != audio_rate || bink2_enable_audio(b, 0, 1) != 0)
+            ok = 0;
+    }
     for (f = 0; ok && f < frames; f++) {
         int status = f == 0 ? bink2_first(b) : bink2_next(b);
         int plane;
 
         if (status == BINK2_ERROR)
             ok = 0;
+        if (ok && audio_channels != 0) {
+            unsigned long size = bink2_get_audio_size(b, 0);
+
+            if (bink2_get_audio(b, 0) == NULL && size != 0)
+                ok = 0;
+            decoded_audio += size;
+        }
         for (plane = 0; ok && plane < 3; plane++) {
             const unsigned char *decoded = bink2_get_plane(b, plane);
             int stride = bink2_get_stride(b, plane);
@@ -159,6 +193,8 @@ static int verify_written(FILE *file, FILE *recon, int width, int height,
                     ok = 0;
         }
     }
+    if (ok && audio_channels != 0 && decoded_audio != expected_pcm)
+        ok = 0;
     bink2_close(b);
     free(ref);
     return ok ? 0 : -1;
@@ -177,6 +213,14 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
     int slices;
     Bink2Frame frame;
     Bink2Video state;
+    Bink2EncAudio *audio = NULL;
+    Bink2EncAudioTrack audio_track;
+    unsigned long audio_max_decoded = 0;
+    unsigned long audio_pcm_total = 0;
+    unsigned char *audio_payload = NULL;
+    size_t audio_size = 0;
+    size_t audio_pcm_bytes = 0;
+    int audio_channels;
     FILE *recon = NULL;
     FILE *verify_recon = NULL;
     unsigned long f;
@@ -190,6 +234,21 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
     if (source == NULL || options == NULL || file == NULL)
         return BINK2_ENC_ERR_USAGE;
     slices = (int)options->slices;
+    audio_channels = source->audio.channels;
+    memset(&audio_track, 0, sizeof(audio_track));
+    if (audio_channels != 0) {
+        if (bink2_enc_audio_open(
+                &audio, source->audio.rate, audio_channels,
+                source->audio.sample_count, source->fps_num, source->fps_den,
+                source->frame_count, options->audio_quality,
+                &audio_max_decoded) != 0)
+            return BINK2_ENC_ERR_INPUT;
+        audio_track.rate = source->audio.rate;
+        audio_track.channels = audio_channels;
+        audio_track.max_decoded = audio_max_decoded;
+        audio_track.id = 1;
+        audio_track.use_dct = 1;
+    }
     frame_q = 8 + (100 - options->quality) / 5;
     if (frame_q < 1)
         frame_q = 1;
@@ -207,9 +266,13 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
                                      (unsigned long)source->height,
                                      source->fps_num, source->fps_den,
                                      source->frame_count,
-                                     slice_flags((unsigned) slices), NULL, 0,
-                                     &index_offset) != 0)
+                                     slice_flags((unsigned) slices),
+                                     audio != NULL ? &audio_track : NULL,
+                                     audio != NULL ? 1UL : 0UL,
+                                     &index_offset) != 0) {
+        bink2_enc_audio_close(audio);
         return BINK2_ENC_ERR_ENCODE;
+    }
 
     if (options->recon_path != NULL) {
         recon = fopen(options->recon_path, "wb");
@@ -293,18 +356,43 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
             goto done;
         }
         bytes = bink2_bw_bytes(&bw);
+        free(audio_payload);
+        audio_payload = NULL;
+        audio_size = 0;
+        audio_pcm_bytes = 0;
+        if (audio != NULL &&
+            bink2_enc_audio_frame(audio, source->read_audio, source->user,
+                                  f + 1 == source->frame_count,
+                                  &audio_payload, &audio_size,
+                                  &audio_pcm_bytes) != 0) {
+            bink2_bw_free(&bw);
+            bink2_video_uninit(&state);
+            bink2_frame_free(&frame);
+            goto done;
+        }
+        audio_pcm_total += (unsigned long)audio_pcm_bytes;
         offset = ftell(file);
-        if (offset < 0 || (unsigned long)offset > 0xFFFFFFFFUL - bytes ||
+        if (offset < 0 ||
+            (unsigned long)offset > 0xFFFFFFFFUL - bytes -
+                                       (audio != NULL
+                                            ? 4UL + audio_size
+                                            : 0UL) ||
+            (audio != NULL &&
+             (write_u32(file, (unsigned long)audio_size) != 0 ||
+              (audio_size != 0 &&
+               fwrite(audio_payload, 1, audio_size, file) != audio_size))) ||
             fwrite(bink2_bw_data(&bw), 1, bytes, file) != bytes) {
             bink2_bw_free(&bw);
             bink2_video_uninit(&state);
             bink2_frame_free(&frame);
             goto done;
         }
+        free(audio_payload);
+        audio_payload = NULL;
         offsets[f] = (unsigned long)offset;
         keys[f] = (unsigned char)(is_key ? 1 : 0);
-        if (bytes > largest)
-            largest = (unsigned long)bytes;
+        if ((audio != NULL ? 4UL + audio_size : 0UL) + bytes > largest)
+            largest = (audio != NULL ? 4UL + audio_size : 0UL) + bytes;
         if (target_bytes > 0) {
             if ((long)bytes > target_bytes * 3 / 2)
                 frame_q += 3;
@@ -360,7 +448,8 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
         fflush(verify_recon);
         if (fseek(verify_recon, 0, SEEK_SET) != 0 ||
             verify_written(file, verify_recon, source->width, source->height,
-                           source->frame_count) != 0)
+                           source->frame_count, audio_channels,
+                           source->audio.rate, audio_pcm_total) != 0)
             verify_failed = 1;
         fseek(file, 0, SEEK_END);
     }
@@ -371,6 +460,8 @@ int bink2_enc_encode_intra(const bink2_enc_source *source,
     rc = 0;
 
 done:
+    bink2_enc_audio_close(audio);
+    free(audio_payload);
     if (recon != NULL)
         fclose(recon);
     if (verify_recon != NULL)
