@@ -119,9 +119,11 @@ crossfade reconstructs the signal instead of smearing it. The final block pads
 with silence. The first `overlap_len` samples of the stream fade in from
 silence; tests skip that startup transient.
 
-`max_decoded` in the container is an upper bound: the video-duration sample
-count plus one `block_out` block, times channels times two. The decoder uses it
-as an allocation cap and rejects larger chunks.
+`max_decoded` in the container is the PCM size of the largest frame's chunk:
+the most blocks any frame carries, times `block_out`, channels, and two. The
+encoder finds it by running the schedule above at open. RAD's files use the
+field the same way, as a per-frame bound (`ge_video_86l.bk2` stores 145920
+for a 3.6 MB stream), and the decoder rejects any chunk larger than it.
 
 ## Container
 
@@ -226,7 +228,7 @@ encoder, and no binary audio fixture is committed.
 | Test | Covers |
 | --- | --- |
 | `enc_wav` | 8/16/24-bit mono and stereo WAV, odd chunk padding, unknown chunks, truncated data, non-PCM tags, unsupported channel counts. |
-| `enc_audio` | Decoder round trip and SNR per rate class; silence, DC, full-scale high-frequency content; quality ordering; scheduling and video-duration truncation; writer and reader ending at the same bit position. |
+| `enc_audio` | Decoder round trip and SNR per rate class; silence, DC, full-scale high-frequency content; quality ordering; scheduling and video-duration truncation; `max_decoded` equal to the largest frame's PCM; writer and reader ending at the same bit position. |
 | `enc_container_audio` | Header track descriptor, stereo and mono flags, the no-track case. |
 | `enc_audio_file` | Whole-file encodes with audio, short-source padding, packet sizes, a corrupted reported-size field. |
 | `enc_api` | Audio field and `audio_quality` validation, and a failing `read_audio` callback. |

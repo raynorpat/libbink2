@@ -616,6 +616,64 @@ static int test_video_truncation(void)
     return 0;
 }
 
+/* max_decoded is a per-frame bound, as in RAD's files (ge_video_86l.bk2:
+ * 145920 against a 3.6 MB stream). It must equal the largest frame's PCM,
+ * not the whole stream's. */
+static int test_max_decoded_per_frame(void)
+{
+    static const struct {
+        unsigned long rate;
+        int channels;
+        unsigned long fps_num, fps_den, frames;
+    } cases[3] = {
+        { 48000, 2, 30, 1, 300 },
+        { 22050, 1, 30000, 1001, 100 },
+        { 8000, 1, 60, 1, 120 }
+    };
+    int c;
+
+    for (c = 0; c < 3; c++) {
+        unsigned long samples = cases[c].rate * cases[c].frames *
+                                cases[c].fps_den / cases[c].fps_num;
+        short *pcm = make_sine(cases[c].rate, samples, cases[c].channels,
+                               440.0, 0.5);
+        Encoded encoded;
+        unsigned long largest = 0;
+        unsigned long total = 0;
+        unsigned long f;
+
+        CHECK(pcm != NULL);
+        if (encode_all(cases[c].rate, cases[c].channels, samples, pcm,
+                       cases[c].fps_num, cases[c].fps_den, cases[c].frames,
+                       80, &encoded) != 0) {
+            free(pcm);
+            return 1;
+        }
+        for (f = 0; f < encoded.frames; f++) {
+            if (encoded.pcm_bytes[f] > largest)
+                largest = (unsigned long)encoded.pcm_bytes[f];
+            total += (unsigned long)encoded.pcm_bytes[f];
+        }
+        CHECK(largest > 0);
+        CHECK(encoded.max_decoded == largest);
+        CHECK(encoded.max_decoded < total);
+        free_encoded(&encoded);
+        free(pcm);
+    }
+
+    /* Over 32 bits of samples is rejected before the schedule walks
+     * 10^13 blocks. */
+    {
+        Bink2EncAudio *audio = NULL;
+        unsigned long max_decoded = 0;
+
+        CHECK(bink2_enc_audio_open(&audio, 65535, 2, 1000, 1, 1000000UL,
+                                   1000000UL, 80, 0, &max_decoded) == -1);
+        CHECK(audio == NULL);
+    }
+    return 0;
+}
+
 static int test_clamp(void)
 {
     unsigned long magnitude = 0;
@@ -645,5 +703,6 @@ int main(void)
     CHECK(test_zero_blocks() == 0);
     CHECK(test_video_truncation() == 0);
     CHECK(test_clamp() == 0);
+    CHECK(test_max_decoded_per_frame() == 0);
     return 0;
 }

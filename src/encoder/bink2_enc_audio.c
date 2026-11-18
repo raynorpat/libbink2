@@ -400,6 +400,8 @@ int bink2_enc_audio_open(Bink2EncAudio **out, unsigned long rate,
     Bink2EncAudio *audio;
     uint64_t acc = 0;
     uint64_t video_samples = 0;
+    uint64_t produced = 0;
+    uint64_t most_blocks = 0;
     uint64_t bytes;
     unsigned long i;
 
@@ -444,22 +446,34 @@ int bink2_enc_audio_open(Bink2EncAudio **out, unsigned long rate,
         return -1;
     }
 
+    /* Run the same schedule as take_blocks to find the largest number of
+     * blocks any one frame carries. max_decoded is that frame's PCM size:
+     * RAD's files use the field as a per-frame bound, and the decoder caps
+     * each chunk with it. */
     for (i = 0; i < frame_count; i++) {
+        uint64_t blocks = 0;
+
         acc += (uint64_t)rate * fps_den;
         video_samples += acc / fps_num;
         acc %= fps_num;
+        if (video_samples > 0xffffffffUL)
+            break;
+        while (produced < video_samples) {
+            produced += (uint64_t)audio->block_out;
+            blocks++;
+        }
+        if (blocks > most_blocks)
+            most_blocks = blocks;
     }
     if (video_samples > 0xffffffffUL) {
         bink2_enc_audio_close(audio);
         return -1;
     }
     audio->video_end = (unsigned long)video_samples;
-    video_samples += (uint64_t)audio->block_out;
-    if (video_samples > UINT64_MAX / ((uint64_t)channels * 2u)) {
-        bink2_enc_audio_close(audio);
-        return -1;
-    }
-    bytes = video_samples * (uint64_t)channels * 2u;
+    if (most_blocks == 0)
+        most_blocks = 1;
+    bytes = most_blocks * (uint64_t)audio->block_out *
+            (uint64_t)channels * 2u;
     if (bytes > 0xffffffffULL) {
         bink2_enc_audio_close(audio);
         return -1;
