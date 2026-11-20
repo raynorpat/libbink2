@@ -2,6 +2,7 @@
 #include "bink2_dsp.h"
 #include "bink2_internal.h"
 #include "bink2_video.h"
+#include "bink2_video_new.h"
 #include "test_common.h"
 
 static int test_geometry(void)
@@ -357,6 +358,76 @@ static int test_packet_shrinks(void)
     return 0;
 }
 
+#define TMV(arr, mb, k, c) ((arr)[(mb) * 8 + (k) * 2 + (c)])
+
+/* The quantiser predictor the decoder and the encoder share: 16 at a
+ * slice's top-left macroblock, the left neighbour along the first row, the
+ * top neighbour down the first column, else the median of top, left and
+ * top-left. */
+static int test_predict_q(void)
+{
+    Bink2Video v;
+    Bink2Slice *s;
+
+    CHECK(bink2_video_init(&v, 160, 96, 0, 'j') == 0);
+    s = &v.slice[0];
+    s->mb_pos = 2;
+    s->q_cur[1].intra_q = 10;
+    s->q_cur[1].inter_q = 11;
+    s->q_prev[2].intra_q = 30;
+    s->q_prev[2].inter_q = 31;
+    s->q_prev[1].intra_q = 20;
+    s->q_prev[1].inter_q = 41;
+    CHECK(bink2_new_predict_q(s, 0x20 | 0x80, 0) == 16);
+    CHECK(bink2_new_predict_q(s, 0x20 | 0x80, 1) == 16);
+    CHECK(bink2_new_predict_q(s, 0x80, 0) == 10);
+    CHECK(bink2_new_predict_q(s, 0x80, 1) == 11);
+    CHECK(bink2_new_predict_q(s, 0x20, 0) == 30);
+    CHECK(bink2_new_predict_q(s, 0x20, 1) == 31);
+    CHECK(bink2_new_predict_q(s, 0, 0) == 20);    /* median(30, 10, 20) */
+    CHECK(bink2_new_predict_q(s, 0, 1) == 31);    /* median(31, 11, 41) */
+    bink2_video_uninit(&v);
+    return 0;
+}
+
+/* The shared motion-vector predictor stores the macroblock's four vectors
+ * in s->mv_cur. */
+static int test_predict_mv(void)
+{
+    Bink2Video v;
+    Bink2Slice *s;
+    int raw[4][2] = { { 3, -2 }, { 1, 1 }, { -4, 5 }, { 2, 0 } };
+    int k;
+
+    CHECK(bink2_video_init(&v, 160, 96, 0, 'j') == 0);
+    s = &v.slice[0];
+    s->mb_pos = 2;
+    /* Left neighbour's vectors 0, 1, 3. */
+    TMV(s->mv_cur, 1, 0, 0) = 8;
+    TMV(s->mv_cur, 1, 1, 0) = -6;
+    TMV(s->mv_cur, 1, 3, 0) = 2;
+    TMV(s->mv_cur, 1, 0, 1) = 1;
+    TMV(s->mv_cur, 1, 1, 1) = 7;
+    TMV(s->mv_cur, 1, 3, 1) = 4;
+
+    /* One vector on a slice's first row: raw + median of the left. */
+    bink2_new_predict_mv(s, 0x80, raw, 1);
+    for (k = 0; k < 4; k++) {
+        CHECK(TMV(s->mv_cur, 2, k, 0) == 3 + 2);
+        CHECK(TMV(s->mv_cur, 2, k, 1) == -2 + 4);
+    }
+
+    /* Four vectors at the top-left macroblock: chained from vector 0. */
+    bink2_new_predict_mv(s, 0x20 | 0x80, raw, 4);
+    CHECK(TMV(s->mv_cur, 2, 0, 0) == 3 && TMV(s->mv_cur, 2, 0, 1) == -2);
+    CHECK(TMV(s->mv_cur, 2, 1, 0) == 4 && TMV(s->mv_cur, 2, 1, 1) == -1);
+    CHECK(TMV(s->mv_cur, 2, 2, 0) == -1 && TMV(s->mv_cur, 2, 2, 1) == 3);
+    /* 3: raw + median(v0, v1, v2) = (2 + 3, 0 + -1) */
+    CHECK(TMV(s->mv_cur, 2, 3, 0) == 5 && TMV(s->mv_cur, 2, 3, 1) == -1);
+    bink2_video_uninit(&v);
+    return 0;
+}
+
 int main(void)
 {
     CHECK(test_geometry() == 0);
@@ -367,5 +438,7 @@ int main(void)
     CHECK(test_mc_edge() == 0);
     CHECK(test_packet_growth() == 0);
     CHECK(test_packet_shrinks() == 0);
+    CHECK(test_predict_q() == 0);
+    CHECK(test_predict_mv() == 0);
     return 0;
 }

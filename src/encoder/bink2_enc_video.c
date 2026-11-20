@@ -4,6 +4,7 @@
 #include "bink2_enc_motion.h"
 #include "bink2_enc_syntax.h"
 #include "bink2_tables.h"
+#include "bink2_video_new.h"
 
 #include <math.h>
 #include <stdlib.h>
@@ -21,71 +22,25 @@ static int clip_int(int value, int low, int high)
     return value;
 }
 
-static int mid_pred(int a, int b, int c)
-{
-    if (a < b) {
-        if (b < c)
-            return b;
-        if (a < c)
-            return c;
-        return a;
-    }
-    if (b < c) {
-        if (a < c)
-            return a;
-        return c;
-    }
-    return b;
-}
-
+/* Quantiser prediction is the decoder's, so both sides agree. */
 static void update_intra_q(Bink2Video *v, int8_t *q, int dq, int flags)
 {
-    int mb = v->slice[0].mb_pos;
-
-    if ((flags & 0x20) && (flags & 0x80)) {
-        *q = (int8_t)(16 + dq);
-    } else if (flags & 0x80) {
-        *q = (int8_t)(v->slice[0].q_cur[mb - 1].intra_q + dq);
-    } else if (flags & 0x20) {
-        *q = (int8_t)(v->slice[0].q_prev[mb].intra_q + dq);
-    } else {
-        *q = (int8_t)(mid_pred(v->slice[0].q_prev[mb].intra_q,
-                               v->slice[0].q_cur[mb - 1].intra_q,
-                               v->slice[0].q_prev[mb - 1].intra_q) + dq);
-    }
+    *q = (int8_t)(bink2_new_predict_q(&v->slice[0], flags, 0) + dq);
 }
 
 static void update_inter_q(Bink2Video *v, int8_t *q, int dq, int flags)
 {
-    int mb = v->slice[0].mb_pos;
-
-    if ((flags & 0x20) && (flags & 0x80)) {
-        *q = (int8_t)(16 + dq);
-    } else if (flags & 0x80) {
-        *q = (int8_t)(v->slice[0].q_cur[mb - 1].inter_q + dq);
-    } else if (flags & 0x20) {
-        *q = (int8_t)(v->slice[0].q_prev[mb].inter_q + dq);
-    } else {
-        *q = (int8_t)(mid_pred(v->slice[0].q_prev[mb].inter_q,
-                               v->slice[0].q_cur[mb - 1].inter_q,
-                               v->slice[0].q_prev[mb - 1].inter_q) + dq);
-    }
+    *q = (int8_t)(bink2_new_predict_q(&v->slice[0], flags, 1) + dq);
 }
 
 static int predict_intra_q(Bink2Video *v, int flags)
 {
-    int8_t predicted;
-
-    update_intra_q(v, &predicted, 0, flags);
-    return predicted;
+    return bink2_new_predict_q(&v->slice[0], flags, 0);
 }
 
 static int predict_inter_q(Bink2Video *v, int flags)
 {
-    int8_t predicted;
-
-    update_inter_q(v, &predicted, 0, flags);
-    return predicted;
+    return bink2_new_predict_q(&v->slice[0], flags, 1);
 }
 
 static int quantise_dc(int desired, int prediction, int q)

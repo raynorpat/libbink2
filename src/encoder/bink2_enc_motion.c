@@ -1,164 +1,11 @@
 #include "bink2_enc_motion.h"
 #include "bink2_dsp.h"
+#include "bink2_video_new.h"
 
 #include <limits.h>
 #include <stdlib.h>
 
 #define MV(arr, mb, k, c) ((arr)[(mb) * 8 + (k) * 2 + (c)])
-
-static int mid_pred(int a, int b, int c)
-{
-    if (a < b) {
-        if (b < c)
-            return b;
-        if (a < c)
-            return c;
-        return a;
-    }
-    if (b < c) {
-        if (a < c)
-            return a;
-        return c;
-    }
-    return b;
-}
-
-static void predict_mv_worker(Bink2Video *v, int flags,
-                             const int raw[4][2], int nb)
-{
-    int mb = v->slice[0].mb_pos;
-    int lm = mb > 0 ? mb - 1 : 0;
-    int32_t *c = v->slice[0].mv_cur;
-    int32_t *l = v->slice[0].mv_cur;
-    int32_t *lt = v->slice[0].mv_prev;
-    int32_t *t = v->slice[0].mv_prev;
-    int k;
-
-    if (nb == 1) {
-        int vx = raw[0][0];
-        int vy = raw[0][1];
-
-        if (flags & 0x80) {
-            if (!(flags & 0x20)) {
-                vx += mid_pred(MV(l, lm, 0, 0), MV(l, lm, 1, 0),
-                                   MV(l, lm, 3, 0));
-                vy += mid_pred(MV(l, lm, 0, 1), MV(l, lm, 1, 1),
-                                   MV(l, lm, 3, 1));
-            }
-        } else {
-            if (!(flags & 0x20)) {
-                vx += mid_pred(MV(lt, lm, 3, 0), MV(t, mb, 2, 0),
-                                   MV(l, lm, 1, 0));
-                vy += mid_pred(MV(lt, lm, 3, 1), MV(t, mb, 2, 1),
-                                   MV(l, lm, 1, 1));
-            } else {
-                vx += mid_pred(MV(t, mb, 0, 0), MV(t, mb, 2, 0),
-                                   MV(t, mb, 3, 0));
-                vy += mid_pred(MV(t, mb, 0, 1), MV(t, mb, 2, 1),
-                                   MV(t, mb, 3, 1));
-            }
-        }
-        for (k = 0; k < 4; k++) {
-            MV(c, mb, k, 0) = vx;
-            MV(c, mb, k, 1) = vy;
-        }
-    } else {
-
-    if (!(flags & 0x80)) {
-        if (flags & 0x20) {
-            MV(c, mb, 0, 0) = raw[0][0] + mid_pred(MV(t, mb, 0, 0),
-                                                       MV(t, mb, 2, 0),
-                                                       MV(t, mb, 3, 0));
-            MV(c, mb, 0, 1) = raw[0][1] + mid_pred(MV(t, mb, 0, 1),
-                                                       MV(t, mb, 2, 1),
-                                                       MV(t, mb, 3, 1));
-            MV(c, mb, 1, 0) = raw[1][0] + mid_pred(MV(t, mb, 2, 0),
-                                                       MV(t, mb, 3, 0),
-                                                       MV(c, mb, 0, 0));
-            MV(c, mb, 1, 1) = raw[1][1] + mid_pred(MV(t, mb, 2, 1),
-                                                       MV(t, mb, 3, 1),
-                                                       MV(c, mb, 0, 1));
-            MV(c, mb, 2, 0) = raw[2][0] + mid_pred(MV(t, mb, 2, 0),
-                                                       MV(c, mb, 0, 0),
-                                                       MV(c, mb, 1, 0));
-            MV(c, mb, 2, 1) = raw[2][1] + mid_pred(MV(t, mb, 2, 1),
-                                                       MV(c, mb, 0, 1),
-                                                       MV(c, mb, 1, 1));
-            MV(c, mb, 3, 0) = raw[3][0] + mid_pred(MV(c, mb, 0, 0),
-                                                       MV(c, mb, 1, 0),
-                                                       MV(c, mb, 2, 0));
-            MV(c, mb, 3, 1) = raw[3][1] + mid_pred(MV(c, mb, 0, 1),
-                                                       MV(c, mb, 1, 1),
-                                                       MV(c, mb, 2, 1));
-        } else {
-            MV(c, mb, 0, 0) = raw[0][0] + mid_pred(MV(t, mb, 2, 0),
-                                                       MV(lt, lm, 3, 0),
-                                                       MV(l, lm, 1, 0));
-            MV(c, mb, 0, 1) = raw[0][1] + mid_pred(MV(t, mb, 2, 1),
-                                                       MV(lt, lm, 3, 1),
-                                                       MV(l, lm, 1, 1));
-            MV(c, mb, 1, 0) = raw[1][0] + mid_pred(MV(t, mb, 2, 0),
-                                                       MV(t, mb, 3, 0),
-                                                       MV(c, mb, 0, 0));
-            MV(c, mb, 1, 1) = raw[1][1] + mid_pred(MV(t, mb, 2, 1),
-                                                       MV(t, mb, 3, 1),
-                                                       MV(c, mb, 0, 1));
-            MV(c, mb, 2, 0) = raw[2][0] + mid_pred(MV(l, lm, 1, 0),
-                                                       MV(l, lm, 3, 0),
-                                                       MV(c, mb, 0, 0));
-            MV(c, mb, 2, 1) = raw[2][1] + mid_pred(MV(l, lm, 1, 1),
-                                                       MV(l, lm, 3, 1),
-                                                       MV(c, mb, 0, 1));
-            MV(c, mb, 3, 0) = raw[3][0] + mid_pred(MV(c, mb, 0, 0),
-                                                       MV(c, mb, 1, 0),
-                                                       MV(c, mb, 2, 0));
-            MV(c, mb, 3, 1) = raw[3][1] + mid_pred(MV(c, mb, 0, 1),
-                                                       MV(c, mb, 1, 1),
-                                                       MV(c, mb, 2, 1));
-        }
-    } else {
-        if (flags & 0x20) {
-            MV(c, mb, 0, 0) = raw[0][0];
-            MV(c, mb, 0, 1) = raw[0][1];
-            MV(c, mb, 1, 0) = raw[1][0] + MV(c, mb, 0, 0);
-            MV(c, mb, 1, 1) = raw[1][1] + MV(c, mb, 0, 1);
-            MV(c, mb, 2, 0) = raw[2][0] + MV(c, mb, 0, 0);
-            MV(c, mb, 2, 1) = raw[2][1] + MV(c, mb, 0, 1);
-            MV(c, mb, 3, 0) = raw[3][0] + mid_pred(MV(c, mb, 0, 0),
-                                                       MV(c, mb, 1, 0),
-                                                       MV(c, mb, 2, 0));
-            MV(c, mb, 3, 1) = raw[3][1] + mid_pred(MV(c, mb, 0, 1),
-                                                       MV(c, mb, 1, 1),
-                                                       MV(c, mb, 2, 1));
-        } else {
-            MV(c, mb, 0, 0) = raw[0][0] + mid_pred(MV(l, lm, 0, 0),
-                                                       MV(l, lm, 1, 0),
-                                                       MV(l, lm, 3, 0));
-            MV(c, mb, 0, 1) = raw[0][1] + mid_pred(MV(l, lm, 0, 1),
-                                                       MV(l, lm, 1, 1),
-                                                       MV(l, lm, 3, 1));
-            MV(c, mb, 2, 0) = raw[2][0] + mid_pred(MV(l, lm, 1, 0),
-                                                       MV(l, lm, 3, 0),
-                                                       MV(c, mb, 0, 0));
-            MV(c, mb, 2, 1) = raw[2][1] + mid_pred(MV(l, lm, 1, 1),
-                                                       MV(l, lm, 3, 1),
-                                                       MV(c, mb, 0, 1));
-            MV(c, mb, 1, 0) = raw[1][0] + mid_pred(MV(l, lm, 1, 0),
-                                                       MV(c, mb, 0, 0),
-                                                       MV(c, mb, 2, 0));
-            MV(c, mb, 1, 1) = raw[1][1] + mid_pred(MV(l, lm, 1, 1),
-                                                       MV(c, mb, 0, 1),
-                                                       MV(c, mb, 2, 1));
-            MV(c, mb, 3, 0) = raw[3][0] + mid_pred(MV(c, mb, 0, 0),
-                                                       MV(c, mb, 1, 0),
-                                                       MV(c, mb, 2, 0));
-            MV(c, mb, 3, 1) = raw[3][1] + mid_pred(MV(c, mb, 0, 1),
-                                                       MV(c, mb, 1, 1),
-                                                       MV(c, mb, 2, 1));
-        }
-    }
-    }
-}
 
 void bink2_enc_predict_mv(Bink2Video *v, int flags, const int raw[4][2],
                           int nb, int out[4][2])
@@ -166,7 +13,8 @@ void bink2_enc_predict_mv(Bink2Video *v, int flags, const int raw[4][2],
     int mb = v->slice[0].mb_pos;
     int k;
 
-    predict_mv_worker(v, flags, raw, nb);
+    /* The decoder's predictor, so both sides agree. */
+    bink2_new_predict_mv(&v->slice[0], flags, raw, nb);
     for (k = 0; k < 4; k++) {
         out[k][0] = (int)MV(v->slice[0].mv_cur, mb, k, 0);
         out[k][1] = (int)MV(v->slice[0].mv_cur, mb, k, 1);

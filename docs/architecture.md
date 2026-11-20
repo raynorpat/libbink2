@@ -83,7 +83,10 @@ oracle nor libbink2 implements. See [bink2.md](bink2.md) and
 The encoder links the decoder and calls the same dequantise, IDCT, put/add,
 and motion-compensation functions to build its reference frames. The encoder's
 reconstruction is therefore byte-identical to what the decoder produces, and
-the tests assert that for every frame. A change to shared codec code affects
+the tests assert that for every frame. It also predicts quantisers and motion
+vectors with the decoder's `bink2_new_predict_q()` and
+`bink2_new_predict_mv()`, so the deltas it writes are against the same
+predictions the decoder makes. A change to shared codec code affects
 both libraries at once; a private reimplementation on the encoder side would
 break this guarantee.
 
