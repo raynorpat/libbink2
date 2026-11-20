@@ -12,6 +12,7 @@ cmake --build build
 | --- | --- | --- |
 | `bink2_build` | Encode images to a `.bk2` file | `BINK2_BUILD_ENCODER=ON` (the default) |
 | `bink2_dump` | Decode a `.bk2` file to PPM frames and print plane checksums | nothing extra |
+| `bink2_bench` | Time video decoding of a `.bk2` file | nothing extra |
 | `bink2_sdl_player` | Play with the SDL renderer, with audio | SDL3 or SDL2 |
 | `bink2_sdlgl_player` | Play with SDL + OpenGL 3.2 | SDL3 or SDL2 |
 | `bink2_sdlmetal_player` | Play with SDL + Metal | macOS, SDL3 or SDL2 |
@@ -111,6 +112,27 @@ first frame that diverges from a reference.
 
 Exit codes: `0` success, `1` open, decode, or write failure, `2` bad command
 line.
+
+## bink2_bench
+
+```
+bink2_bench [--iterations N] [--frames N] [--rgb] file.bk2
+```
+
+Decodes the video of `file.bk2` from the first frame `N` times (default 5)
+with audio disabled, and prints the total frame count, wall-clock seconds,
+and frames per second:
+
+```
+$ build/bink2_bench --iterations 3 clip.bk2
+frames=180 seconds=5.712 fps=31.5
+```
+
+`--frames N` stops each pass after `N` frames, for files whose index lists
+frames that are missing. `--rgb` also converts every frame to RGB with
+`bink2_get_video()`, which is the cost a player pays.
+
+Exit codes: `0` success, `1` open or decode failure, `2` bad command line.
 
 ## bink2_sdl_player
 

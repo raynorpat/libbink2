@@ -14,8 +14,18 @@ add_executable(test_frames test_frames.c)
 target_link_libraries(test_frames PRIVATE ${BINK2_LINK_TARGET})
 add_test(NAME frames COMMAND test_frames)
 
+add_executable(test_thread test_thread.c)
+target_link_libraries(test_thread PRIVATE ${BINK2_LINK_TARGET})
+add_test(NAME thread COMMAND test_thread)
+
+add_executable(test_dsp_simd test_dsp_simd.c)
+target_link_libraries(test_dsp_simd PRIVATE ${BINK2_LINK_TARGET})
+add_test(NAME dsp_simd COMMAND test_dsp_simd)
+
 add_executable(test_video test_video.c)
 target_link_libraries(test_video PRIVATE ${BINK2_LINK_TARGET})
+target_compile_definitions(test_video PRIVATE
+  BINK2_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/media")
 add_test(NAME video COMMAND test_video)
 
 add_executable(test_decode_f test_decode_f.c)
@@ -55,6 +65,13 @@ if(TARGET bink2_dump)
     -DCHECK_SCRIPT=${CMAKE_CURRENT_SOURCE_DIR}/check_dump.cmake
     -P ${CMAKE_CURRENT_SOURCE_DIR}/run_dump.cmake)
   set_tests_properties(dump PROPERTIES SKIP_RETURN_CODE 77)
+endif()
+
+if(TARGET bink2_bench)
+  add_test(NAME bench_smoke COMMAND bink2_bench --iterations 2 --rgb
+    ${CMAKE_CURRENT_SOURCE_DIR}/media/synthetic_kb2j.bk2)
+  set_tests_properties(bench_smoke PROPERTIES PASS_REGULAR_EXPRESSION
+    "frames=[0-9]+ seconds=[0-9.]+ fps=[0-9.]+")
 endif()
 
 add_executable(test_player_motion test_player_motion.c
@@ -104,6 +121,10 @@ if(TARGET bink2_encoder)
   target_compile_definitions(test_enc_image PRIVATE
     BINK2_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/media")
   add_test(NAME enc_image COMMAND test_enc_image)
+
+  add_executable(test_threads test_threads.c)
+  target_link_libraries(test_threads PRIVATE bink2_encoder)
+  add_test(NAME threads COMMAND test_threads)
 
   add_executable(test_enc_options test_enc_options.c)
   target_link_libraries(test_enc_options PRIVATE bink2_encoder)

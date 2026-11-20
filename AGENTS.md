@@ -5,8 +5,8 @@ should start with [CONTRIBUTING.md](CONTRIBUTING.md); the commands and rules
 are the same.
 
 libbink2 is a C99 library that decodes Bink 2 video (`.bk2`, `KB2f`..`KB2n`)
-and encodes `KB2j`. It has no dependencies beyond libc and libm. SDL is
-optional and used only by the player.
+and encodes `KB2j`. It has no dependencies beyond libc, libm, and the platform
+thread library. SDL is optional and used only by the player.
 
 ## Commands
 
@@ -34,10 +34,25 @@ cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DBINK2_BUILD_TOOLS=ON \
   -DCMAKE_C_FLAGS="-fsanitize=address,undefined -fno-omit-frame-pointer"
 cmake --build build-asan
 ctest --test-dir build-asan --output-on-failure
+
+# thread sanitizer build; use it for any change to slice threading
+cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DBINK2_BUILD_TOOLS=ON \
+  -DCMAKE_C_FLAGS="-fsanitize=thread"
+cmake --build build-tsan
+ctest --test-dir build-tsan --output-on-failure
+
+# scalar-only build; use it for any change to a SIMD routine, and run the
+# full suite with BINK2_THREADS=1 to check serial decoding
+cmake -S . -B build-scalar -DBINK2_BUILD_TOOLS=ON -DBINK2_SIMD=OFF
+cmake --build build-scalar
+ctest --test-dir build-scalar --output-on-failure
+
+# decode speed (frames per second); BINK2_THREADS=1 measures serial
+build/bink2_bench --iterations 5 --rgb <file.bk2>
 ```
 
 With `BINK2_BUILD_TOOLS=ON` on macOS, with SDL and Vulkan found, CTest
-registers 32 tests. A player whose dependency is missing has no test, and
+registers 36 tests. A player whose dependency is missing has no test, and
 Windows adds the D3D9/D3D11 tests. Tests that cannot run report `Skipped`
 (exit code 77):
 
@@ -59,7 +74,7 @@ run the synthetic tests and state that the reference tests were skipped.
 | --- | --- |
 | `src/bink2.h` | Public decoder API |
 | `src/encoder/bink2_encoder.h` | Public encoder API |
-| `src/` | Decoder and codec code shared with the encoder |
+| `src/` | Decoder and codec code shared with the encoder; `bink2_thread.c` is the slice thread pool, `bink2_dsp_neon.c`/`bink2_dsp_sse2.c` the SIMD routines |
 | `src/encoder/` | Encoder; `bink2_enc_audio.c` and `bink2_enc_wav.c` are the audio track and WAV loader |
 | `src/tools/` | `bink2_build`, `bink2_dump`, `bink2_sdl_player`; `player/` holds the renderer players |
 | `tests/` | One `test_*.c` program per CTest test; `test_common.h` has `CHECK` and the hash helpers |

@@ -2,6 +2,7 @@
 #define LIBBINK2_BITS_H
 
 #include <stddef.h>
+#include <stdint.h>
 
 /** LSB-first bit reader over a byte buffer. */
 typedef struct {
@@ -20,6 +21,13 @@ int bink2_bits_read1(Bink2Bits *bits);
  * stream ends first.
  */
 int bink2_bits_read_unary(Bink2Bits *bits, int stop, int max);
+/**
+ * Read one prefix code: the index of the shortest code (lowest index among
+ * equal lengths) of 1..12 bits matching the stream, or -1 when none does,
+ * after consuming up to 12 bits, or when the stream ends first.
+ */
+int bink2_bits_read_vlc(Bink2Bits *bits, const uint16_t *codes,
+                        const uint8_t *lengths, int count);
 int bink2_bits_left(const Bink2Bits *bits);
 /** True after a read helper ran past the buffer (it marks bitpos). */
 int bink2_bits_failed(const Bink2Bits *bits);

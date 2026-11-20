@@ -75,7 +75,7 @@ static int test_mv_inversion(void)
     int k;
 
     CHECK(bink2_video_init(&v, 64, 64, 0, 'j') == 0);
-    v.old_mb_pos = 1;
+    v.slice[0].mb_pos = 1;
     bink2_enc_invert_mv(&v, 0x80, desired, 4, raw);
     bink2_enc_predict_mv(&v, 0x80, raw, 4, predicted);
     for (k = 0; k < 4; k++) {

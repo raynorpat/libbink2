@@ -25,47 +25,126 @@ int bink2_bits_failed(const Bink2Bits *bits)
     return bits->bitpos > bits->size * 8;
 }
 
+static int host_is_little_endian(void)
+{
+    const uint16_t one = 1;
+    unsigned char first;
+
+    memcpy(&first, &one, 1);
+    return first == 1;
+}
+
+/* The next count (1..32) bits, LSB-first, without consuming them. The
+ * caller guarantees they are inside the buffer; no byte past the buffer is
+ * read. */
+static uint32_t peek_bits(const Bink2Bits *bits, int count)
+{
+    size_t byte = bits->bitpos >> 3;
+    const unsigned char *p = bits->data + byte;
+    int shift = (int)(bits->bitpos & 7);
+    uint64_t window = 0;
+
+    if (byte + 8 <= bits->size && host_is_little_endian()) {
+        memcpy(&window, p, 8);
+    } else {
+        int nbytes = (shift + count + 7) >> 3;
+        int i;
+
+        for (i = 0; i < nbytes; i++)
+            window |= (uint64_t)p[i] << (8 * i);
+    }
+    return (uint32_t)((window >> shift) & (((uint64_t)1 << count) - 1));
+}
+
 int bink2_bits_read(Bink2Bits *bits, int count)
 {
-    uint32_t value = 0;
+    uint32_t value;
     size_t total;
-    int i;
 
     if (count < 0 || count > 32)
         return -1;
     total = bits->size * 8;
     if (bits->bitpos > total || (size_t)count > total - bits->bitpos)
         return -1;
-    for (i = 0; i < count; i++) {
-        size_t pos = bits->bitpos + (size_t)i;
-
-        if (bits->data[pos >> 3] & (1u << (pos & 7)))
-            value |= (uint32_t)1u << i;
-    }
+    if (count == 0)
+        return 0;
+    value = peek_bits(bits, count);
     bits->bitpos += (size_t)count;
     return (int)value;
 }
 
 int bink2_bits_read1(Bink2Bits *bits)
 {
-    return bink2_bits_read(bits, 1);
+    size_t pos = bits->bitpos;
+
+    if (pos >= bits->size * 8)
+        return -1;
+    bits->bitpos = pos + 1;
+    return (bits->data[pos >> 3] >> (pos & 7)) & 1;
 }
 
 int bink2_bits_read_unary(Bink2Bits *bits, int stop, int max)
 {
-    int i;
+    size_t total = bits->size * 8;
+    int done = 0;
 
     if (max < 0)
         return -1;
-    for (i = 0; i < max; i++) {
-        int bit = bink2_bits_read1(bits);
+    while (done < max) {
+        size_t avail;
+        uint32_t window, hit;
+        int n, k;
 
-        if (bit < 0)
+        if (bits->bitpos >= total)
             return -1;
-        if (bit == stop)
-            return i;
+        avail = total - bits->bitpos;
+        n = max - done < 24 ? max - done : 24;
+        if ((size_t)n > avail)
+            n = (int)avail;
+        window = peek_bits(bits, n);
+        hit = stop == 1 ? window : stop == 0 ? ~window : 0;
+        hit &= ((uint32_t)1 << n) - 1;
+        if (hit != 0) {
+            for (k = 0; !(hit & 1u); k++)
+                hit >>= 1;
+            bits->bitpos += (size_t)k + 1;
+            return done + k;
+        }
+        bits->bitpos += (size_t)n;
+        done += n;
     }
     return max;
+}
+
+int bink2_bits_read_vlc(Bink2Bits *bits, const uint16_t *codes,
+                        const uint8_t *lengths, int count)
+{
+    size_t total = bits->size * 8;
+    uint32_t window;
+    int n, i, best = -1, best_len = 13;
+
+    if (bits->bitpos >= total)
+        return -1;
+    n = total - bits->bitpos < 12 ? (int)(total - bits->bitpos) : 12;
+    window = peek_bits(bits, n);
+    /* The shortest matching code wins, then the lowest index: the order a
+     * bit-at-a-time search finds them in. */
+    for (i = 0; i < count; i++) {
+        int len = lengths[i];
+
+        if (len >= 1 && len <= n && len < best_len &&
+            (window & (((uint32_t)1 << len) - 1)) == codes[i]) {
+            best = i;
+            best_len = len;
+        }
+    }
+    if (best < 0) {
+        /* The search read every bit it could before giving up. */
+        bits->bitpos += (size_t)n;
+        return -1;
+    }
+    bits->bitpos += (size_t)best_len;
+    return best;
 }
 
 void bink2_bits_skip(Bink2Bits *bits, int count)

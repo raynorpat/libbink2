@@ -40,35 +40,35 @@ static int mid_pred(int a, int b, int c)
 
 static void update_intra_q(Bink2Video *v, int8_t *q, int dq, int flags)
 {
-    int mb = v->old_mb_pos;
+    int mb = v->slice[0].mb_pos;
 
     if ((flags & 0x20) && (flags & 0x80)) {
         *q = (int8_t)(16 + dq);
     } else if (flags & 0x80) {
-        *q = (int8_t)(v->new_q_cur[mb - 1].intra_q + dq);
+        *q = (int8_t)(v->slice[0].q_cur[mb - 1].intra_q + dq);
     } else if (flags & 0x20) {
-        *q = (int8_t)(v->new_q_prev[mb].intra_q + dq);
+        *q = (int8_t)(v->slice[0].q_prev[mb].intra_q + dq);
     } else {
-        *q = (int8_t)(mid_pred(v->new_q_prev[mb].intra_q,
-                               v->new_q_cur[mb - 1].intra_q,
-                               v->new_q_prev[mb - 1].intra_q) + dq);
+        *q = (int8_t)(mid_pred(v->slice[0].q_prev[mb].intra_q,
+                               v->slice[0].q_cur[mb - 1].intra_q,
+                               v->slice[0].q_prev[mb - 1].intra_q) + dq);
     }
 }
 
 static void update_inter_q(Bink2Video *v, int8_t *q, int dq, int flags)
 {
-    int mb = v->old_mb_pos;
+    int mb = v->slice[0].mb_pos;
 
     if ((flags & 0x20) && (flags & 0x80)) {
         *q = (int8_t)(16 + dq);
     } else if (flags & 0x80) {
-        *q = (int8_t)(v->new_q_cur[mb - 1].inter_q + dq);
+        *q = (int8_t)(v->slice[0].q_cur[mb - 1].inter_q + dq);
     } else if (flags & 0x20) {
-        *q = (int8_t)(v->new_q_prev[mb].inter_q + dq);
+        *q = (int8_t)(v->slice[0].q_prev[mb].inter_q + dq);
     } else {
-        *q = (int8_t)(mid_pred(v->new_q_prev[mb].inter_q,
-                               v->new_q_cur[mb - 1].inter_q,
-                               v->new_q_prev[mb - 1].inter_q) + dq);
+        *q = (int8_t)(mid_pred(v->slice[0].q_prev[mb].inter_q,
+                               v->slice[0].q_cur[mb - 1].inter_q,
+                               v->slice[0].q_prev[mb - 1].inter_q) + dq);
     }
 }
 
@@ -112,21 +112,22 @@ static void encode_dc_block(Bink2Video *v, int is_luma, int comp, int count,
                             int dc_actual[16])
 {
     float tdcf[16] = { 0 };
-    int mb = v->old_mb_pos;
+    int mb = v->slice[0].mb_pos;
     int i;
 
-    v->old_comp = comp;
+    v->slice[0].comp = comp;
     for (i = 0; i < count; i++) {
         int prediction;
 
-        bink2_video_predict_dc(v, is_luma, mindc, maxdc, flags, tdcf);
-        prediction = (int)lround(v->old_dc_cur[mb].dc[comp][i]);
+        bink2_video_predict_dc(&v->slice[0], is_luma, mindc, maxdc, flags,
+                               tdcf);
+        prediction = (int)lround(v->slice[0].dc_cur[mb].dc[comp][i]);
         tdc[i] = quantise_dc(desired[i], prediction, q);
         tdcf[i] = (float)tdc[i];
     }
-    bink2_video_predict_dc(v, is_luma, mindc, maxdc, flags, tdcf);
+    bink2_video_predict_dc(&v->slice[0], is_luma, mindc, maxdc, flags, tdcf);
     for (i = 0; i < count; i++)
-        dc_actual[i] = (int)lround(v->old_dc_cur[mb].dc[comp][i]);
+        dc_actual[i] = (int)lround(v->slice[0].dc_cur[mb].dc[comp][i]);
 }
 
 static void fdct_from_plane(const unsigned char *plane, int stride, int width,
@@ -220,7 +221,7 @@ static int encode_luma(Bink2BitWriter *bw, Bink2Video *v,
         clamp_levels(levels[idx]);
     }
 
-    v->old_mb_pos = mb;
+    v->slice[0].mb_pos = mb;
     encode_dc_block(v, 1, 0, 16, 0, 2047, flags, desired, q, tdc,
                     dc_actual);
 
@@ -273,7 +274,7 @@ static int encode_chroma(Bink2BitWriter *bw, Bink2Video *v,
         clamp_levels(levels[idx]);
     }
 
-    v->old_mb_pos = mb;
+    v->slice[0].mb_pos = mb;
     encode_dc_block(v, 0, comp, 4, 0, 2047, flags, desired, q, tdc,
                     dc_actual);
 
@@ -319,15 +320,16 @@ static int encode_slice(Bink2BitWriter *bw, Bink2Video *v, Bink2Frame *src,
 {
     int y, x;
 
-    memset(v->new_q_prev, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
-    memset(v->old_mv_prev, 0,
+    memset(v->slice[0].q_prev, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
+    memset(v->slice[0].mv_prev, 0,
            ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
 
     for (y = y0; y < y1; y += 32) {
         uint32_t prev_y = 0, prev_u = 0, prev_v = 0;
 
-        memset(v->new_q_cur, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
-        memset(v->old_mv_cur, 0,
+        memset(v->slice[0].q_cur, 0,
+               ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
+        memset(v->slice[0].mv_cur, 0,
                ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
 
         for (x = 0; x < src->width; x += 32) {
@@ -345,10 +347,10 @@ static int encode_slice(Bink2BitWriter *bw, Bink2Video *v, Bink2Frame *src,
             if (x + 32 >= src->width)
                 flags |= 0x40;
 
-            v->old_mb_pos = mb;
+            v->slice[0].mb_pos = mb;
             predicted = predict_intra_q(v, flags);
             dq = q - predicted;
-            update_intra_q(v, &v->new_q_cur[mb].intra_q, dq, flags);
+            update_intra_q(v, &v->slice[0].q_cur[mb].intra_q, dq, flags);
             bink2_write_quant(bw, predicted, q);
 
             encode_luma(bw, v, src, x, y, flags, q, &prev_y);
@@ -358,16 +360,16 @@ static int encode_slice(Bink2BitWriter *bw, Bink2Video *v, Bink2Frame *src,
         }
 
         {
-            Bink2OldDc *dc_swap = v->old_dc_cur;
-            Bink2Quant *q_swap = v->new_q_cur;
-            int32_t *mv_swap = v->old_mv_cur;
+            Bink2OldDc *dc_swap = v->slice[0].dc_cur;
+            Bink2Quant *q_swap = v->slice[0].q_cur;
+            int32_t *mv_swap = v->slice[0].mv_cur;
 
-            v->old_dc_cur = v->old_dc_prev;
-            v->old_dc_prev = dc_swap;
-            v->new_q_cur = v->new_q_prev;
-            v->new_q_prev = q_swap;
-            v->old_mv_cur = v->old_mv_prev;
-            v->old_mv_prev = mv_swap;
+            v->slice[0].dc_cur = v->slice[0].dc_prev;
+            v->slice[0].dc_prev = dc_swap;
+            v->slice[0].q_cur = v->slice[0].q_prev;
+            v->slice[0].q_prev = q_swap;
+            v->slice[0].mv_cur = v->slice[0].mv_prev;
+            v->slice[0].mv_prev = mv_swap;
         }
     }
     return 0;
@@ -402,13 +404,13 @@ void bink2_enc_reset_frame(Bink2Video *v)
         if (v->cur[i] != NULL)
             memset(v->cur[i], 0, (size_t)v->stride[i] * h);
     }
-    memset(v->new_q_cur, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
-    memset(v->new_q_prev, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
-    memset(v->old_mv_cur, 0, ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
-    memset(v->old_mv_prev, 0, ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
+    memset(v->slice[0].q_cur, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
+    memset(v->slice[0].q_prev, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
+    memset(v->slice[0].mv_cur, 0, ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
+    memset(v->slice[0].mv_prev, 0, ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
     v->rgb_valid = 0;
-    v->old_mb_pos = 0;
-    v->old_comp = 0;
+    v->slice[0].mb_pos = 0;
+    v->slice[0].comp = 0;
 }
 
 static void update_reference(Bink2Video *v)
@@ -496,7 +498,7 @@ static int encode_residual_luma(Bink2BitWriter *bw, Bink2Video *v,
         clamp_levels(levels[idx]);
     }
 
-    v->old_mb_pos = mb;
+    v->slice[0].mb_pos = mb;
     encode_dc_block(v, 1, 0, 16, -1023, 1023, 0xA8, desired, q, tdc,
                     dc_actual);
 
@@ -548,7 +550,7 @@ static int encode_residual_chroma(Bink2BitWriter *bw, Bink2Video *v,
         clamp_levels(levels[idx]);
     }
 
-    v->old_mb_pos = mb;
+    v->slice[0].mb_pos = mb;
     encode_dc_block(v, 0, comp, 4, -1023, 1023, 0xA8, desired, q, tdc,
                     dc_actual);
 
@@ -579,16 +581,17 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
 {
     int y, x;
 
-    memset(v->new_q_prev, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
-    memset(v->old_mv_prev, 0,
+    memset(v->slice[0].q_prev, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
+    memset(v->slice[0].mv_prev, 0,
            ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
 
     for (y = y0; y < y1; y += 32) {
         uint8_t lru[4] = { 2, 3, 1, 0 };
         uint32_t prev_y = 0, prev_u = 0, prev_v = 0;
 
-        memset(v->new_q_cur, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
-        memset(v->old_mv_cur, 0,
+        memset(v->slice[0].q_cur, 0,
+               ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
+        memset(v->slice[0].mv_cur, 0,
                ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
 
         for (x = 0; x < src->width; x += 32) {
@@ -609,7 +612,7 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
             if (x + 32 >= src->width)
                 flags |= 0x40;
 
-            v->old_mb_pos = mb;
+            v->slice[0].mb_pos = mb;
             {
                 int vx = src->width - x < 32 ? src->width - x : 32;
                 int vy = src->height - y < 32 ? src->height - y : 32;
@@ -619,8 +622,8 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
                     bink2_me_sad(src, ref, x, y, 0, 0) <= visible * 4) {
                 type = 1;
                 bink2_write_btype(bw, lru, type);
-                update_inter_q(v, &v->new_q_cur[mb].inter_q, 0, flags);
-                update_intra_q(v, &v->new_q_cur[mb].intra_q, 0, flags);
+                update_inter_q(v, &v->slice[0].q_cur[mb].inter_q, 0, flags);
+                update_intra_q(v, &v->slice[0].q_cur[mb].intra_q, 0, flags);
                 bink2_video_copy_mb(v, x, y);
                 count_block(stats, type);
                 continue;
@@ -629,10 +632,10 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
             bink2_me_search(src, ref, x, y, range, four_mv, mv, &nb);
 
             bink2_enc_invert_mv(v, flags, mv, nb, raw);
-            bink2_video_mc_luma(v, x, y);
-            bink2_video_mc_chroma(v, x, y);
+            bink2_video_mc_luma(v, &v->slice[0], x, y);
+            bink2_video_mc_chroma(v, &v->slice[0], x, y);
             sad = block_sad(src, v, x, y);
-            update_intra_q(v, &v->new_q_cur[mb].intra_q, 0, flags);
+            update_intra_q(v, &v->slice[0].q_cur[mb].intra_q, 0, flags);
 
             {
                 int vx = src->width - x < 32 ? src->width - x : 32;
@@ -641,7 +644,7 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
                 if (sad <= vx * vy * 2) {
                 type = 2;
                 bink2_write_btype(bw, lru, type);
-                update_inter_q(v, &v->new_q_cur[mb].inter_q, 0, flags);
+                update_inter_q(v, &v->slice[0].q_cur[mb].inter_q, 0, flags);
                 if (nb == 1)
                     bink2_write_mv1(bw, raw[0][0], raw[0][1]);
                 else
@@ -652,7 +655,7 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
 
                 type = 3;
                 bink2_write_btype(bw, lru, type);
-                update_inter_q(v, &v->new_q_cur[mb].inter_q, dq, flags);
+                update_inter_q(v, &v->slice[0].q_cur[mb].inter_q, dq, flags);
                 if (nb == 1)
                     bink2_write_mv1(bw, raw[0][0], raw[0][1]);
                 else
@@ -666,21 +669,21 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
                                        &prev_u);
                 }
             }
-            bink2_video_store_motion(v, x, y, nb);
+            bink2_video_store_motion(v, &v->slice[0], x, y, nb);
             count_block(stats, type);
         }
 
         {
-            Bink2OldDc *dc_swap = v->old_dc_cur;
-            Bink2Quant *q_swap = v->new_q_cur;
-            int32_t *mv_swap = v->old_mv_cur;
+            Bink2OldDc *dc_swap = v->slice[0].dc_cur;
+            Bink2Quant *q_swap = v->slice[0].q_cur;
+            int32_t *mv_swap = v->slice[0].mv_cur;
 
-            v->old_dc_cur = v->old_dc_prev;
-            v->old_dc_prev = dc_swap;
-            v->new_q_cur = v->new_q_prev;
-            v->new_q_prev = q_swap;
-            v->old_mv_cur = v->old_mv_prev;
-            v->old_mv_prev = mv_swap;
+            v->slice[0].dc_cur = v->slice[0].dc_prev;
+            v->slice[0].dc_prev = dc_swap;
+            v->slice[0].q_cur = v->slice[0].q_prev;
+            v->slice[0].q_prev = q_swap;
+            v->slice[0].mv_cur = v->slice[0].mv_prev;
+            v->slice[0].mv_prev = mv_swap;
         }
     }
     return 0;

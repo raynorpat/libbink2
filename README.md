@@ -14,7 +14,9 @@ The decoder and tools are implemented:
   syntax is ported; decoding them half-written would corrupt every plane.
 - Bink Audio 2, up to seven tracks.
 - Keyframe seeking and a 2 GB file ceiling.
-- `bink2_dump`, `bink2_build` (images to `.bk2`, optional WAV audio), and SDL
+- Multithreaded decoding: a frame's slices decode in parallel, up to one
+  thread per slice (`BINK2_THREADS` caps it; see `docs/api.md`).
+- `bink2_dump`, `bink2_bench`, `bink2_build` (images to `.bk2`, optional WAV audio), and SDL
   players for the renderer, OpenGL, Metal, and Vulkan, plus Direct3D 9/11
   players on Windows.
 
@@ -44,13 +46,14 @@ Options:
 | `BINK2_BUILD_STATIC` | `ON` | Build `libbink2.a` |
 | `BINK2_BUILD_SHARED` | `ON` | Build the shared `libbink2` |
 | `BINK2_BUILD_ENCODER` | `ON` | Build the static encoder library `libbink2enc.a` |
-| `BINK2_BUILD_TOOLS` | `OFF` | Build `bink2_dump`, `bink2_build`, and the players |
+| `BINK2_BUILD_TOOLS` | `OFF` | Build `bink2_dump`, `bink2_bench`, `bink2_build`, and the players |
 | `BINK2_BUILD_PLAYER_OPENGL` | `ON` | Build `bink2_sdlgl_player` when SDL is found |
 | `BINK2_BUILD_PLAYER_METAL` | `ON` | Build `bink2_sdlmetal_player` on macOS |
 | `BINK2_BUILD_PLAYER_VULKAN` | `ON` | Build `bink2_sdlvulkan_player` when Vulkan + shaderc are found |
 | `BINK2_BUILD_PLAYER_D3D9` | `ON` | Build `bink2_d3d9_player` on Windows |
 | `BINK2_BUILD_PLAYER_D3D11` | `ON` | Build `bink2_d3d11_player` on Windows |
 | `BINK2_BUILD_TESTS` | `ON` | Build the test programs |
+| `BINK2_SIMD` | `ON` | Use NEON (arm64) or SSE2 (x86-64) for the IDCT, block, motion-compensation, and RGB conversion routines; `OFF` builds scalar code only, with identical output |
 | `BINK2_SDL_VERSION` | `AUTO` | SDL backend for the player: `AUTO`, `2`, or `3` |
 
 At least one of the static and shared libraries must be enabled.

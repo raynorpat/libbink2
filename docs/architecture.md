@@ -28,22 +28,27 @@ docs/                format notes, API and tool reference
 | `bink2_video.c/.h` | Plane allocation, slice layout, motion compensation, DC prediction, RGB conversion, motion-vector storage. |
 | `bink2_video_old.c` | `KB2f` slice syntax (float IDCT, per-component quantisers). |
 | `bink2_video_new.c/.h` | `KB2g`+ slice syntax (integer IDCT, LRU block types). |
-| `bink2_dsp.c/.h` | IDCTs and block put/add. |
+| `bink2_dsp.c/.h` | IDCTs, block put/add, motion compensation, YUV to RGB rows; scalar `*_c` references and the dispatch to SIMD. |
+| `bink2_dsp_neon.c`, `bink2_dsp_sse2.c` | NEON and SSE2 versions of the DSP routines, compiled in when the target has them. |
 | `bink2_tables.c/.h` | Codebooks, scan orders, quantiser matrices. |
 | `bink2_audio.c/.h` | Bink Audio 2. |
+| `bink2_thread.c/.h` | The slice thread pool (POSIX or Win32 threads), CPU count, `BINK2_THREADS`. |
 
 A frame call flows like this:
 
 1. `bink2.c` reads the frame packet using the index.
 2. The packet is split into one audio chunk per track, then the video
    payload.
-3. `bink2_video_decode()` reads the frame flags and slice offsets, then calls
-   the old or new slice decoder per slice depending on the revision.
+3. `bink2_video_decode()` reads the frame flags and slice offsets, then runs
+   the old or new slice decoder for every slice, on the handle's thread pool
+   when the frame has more than one slice. It then checks that each slice
+   ended before the next one starts, as a serial walk would.
 4. Each enabled audio track decodes its chunk.
 
 Decoded planes are padded to 32-sample macroblock boundaries; the public
 getters report the stride and callers crop to the visible size. RGB is
-produced lazily on the first `bink2_get_video()` call for a frame.
+produced lazily on the first `bink2_get_video()` call for a frame, in row
+bands on the slice threads when the handle has them.
 
 ## Encoder
 
@@ -93,6 +98,36 @@ for byte. See [audio-encoder-design.md](audio-encoder-design.md).
 `KB2f` and `KB2g`+ share the container, slice framing, motion compensation,
 and plane handling in `bink2_video.c`, and differ in the slice body. Keep
 revision-specific syntax in `bink2_video_old.c` or `bink2_video_new.c`.
+
+### Slices are independent
+
+A frame's slices share no decoding state. Everything a slice predicts from
+(DC values, motion vectors, quantisers, the current macroblock position) lives
+in its own `Bink2Slice` in `Bink2Video.slice[]` and is reset at the slice's
+first row. A slice writes only its own macroblock rows of the current picture
+and the motion arrays, and reads the reference picture, which is complete
+before the frame starts. The encoder, which codes one slice at a time, uses
+`slice[0]`.
+
+That is what lets slices run in parallel: `decode_impl()` validates every
+slice offset, hands each slice its own bit reader on a `Bink2Pool`, and after
+joining applies the same between-slice and end-of-packet checks the serial
+walk did, so a damaged frame fails identically either way. The pool is
+created lazily, so a `Bink2Video` that never decodes (the encoder's) never
+starts threads. `test_threads` compares threaded and serial output frame by
+frame.
+
+### SIMD is compile-time and bit-exact
+
+`bink2_dsp.h` defines `BINK2_SIMD_NEON` on arm64 and `BINK2_SIMD_SSE2` on
+x86-64 (unless `BINK2_NO_SIMD`, from `-DBINK2_SIMD=OFF`), and each public DSP
+routine calls the matching version. There is no runtime CPU detection: both
+are baseline for their architecture. Every SIMD routine must equal its scalar
+`*_c` reference bit for bit, including saturation and truncation;
+`test_dsp_simd` compares them on random and edge-case inputs. The `KB2f` float
+IDCT stays scalar because reordering float operations changes its output; its
+float-to-pixel block writes are vectorised on SSE2 and AArch64, where the
+conversion rounds half to even like `lrintf`.
 
 ### Untrusted input
 

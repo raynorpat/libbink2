@@ -26,12 +26,12 @@ static int mid_pred(int a, int b, int c)
 static void predict_mv_worker(Bink2Video *v, int flags,
                              const int raw[4][2], int nb)
 {
-    int mb = v->old_mb_pos;
+    int mb = v->slice[0].mb_pos;
     int lm = mb > 0 ? mb - 1 : 0;
-    int32_t *c = v->old_mv_cur;
-    int32_t *l = v->old_mv_cur;
-    int32_t *lt = v->old_mv_prev;
-    int32_t *t = v->old_mv_prev;
+    int32_t *c = v->slice[0].mv_cur;
+    int32_t *l = v->slice[0].mv_cur;
+    int32_t *lt = v->slice[0].mv_prev;
+    int32_t *t = v->slice[0].mv_prev;
     int k;
 
     if (nb == 1) {
@@ -163,13 +163,13 @@ static void predict_mv_worker(Bink2Video *v, int flags,
 void bink2_enc_predict_mv(Bink2Video *v, int flags, const int raw[4][2],
                           int nb, int out[4][2])
 {
-    int mb = v->old_mb_pos;
+    int mb = v->slice[0].mb_pos;
     int k;
 
     predict_mv_worker(v, flags, raw, nb);
     for (k = 0; k < 4; k++) {
-        out[k][0] = (int)MV(v->old_mv_cur, mb, k, 0);
-        out[k][1] = (int)MV(v->old_mv_cur, mb, k, 1);
+        out[k][0] = (int)MV(v->slice[0].mv_cur, mb, k, 0);
+        out[k][1] = (int)MV(v->slice[0].mv_cur, mb, k, 1);
     }
 }
 

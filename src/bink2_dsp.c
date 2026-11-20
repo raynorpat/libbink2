@@ -43,7 +43,7 @@ static void idct_1d_old(float *blk, int step)
     blk[7 * step] = t08 - t12;
 }
 
-void bink2_idct_old(float *block)
+void bink2_idct_old(float block[64])
 {
     int i, j;
 
@@ -58,7 +58,8 @@ void bink2_idct_old(float *block)
     }
 }
 
-void bink2_put_block_f(unsigned char *dst, int stride, const float block[64])
+void bink2_put_block_f_c(unsigned char *dst, int stride,
+                         const float block[64])
 {
     int i, j;
 
@@ -70,7 +71,8 @@ void bink2_put_block_f(unsigned char *dst, int stride, const float block[64])
     }
 }
 
-void bink2_add_block_f(unsigned char *dst, int stride, const float block[64])
+void bink2_add_block_f_c(unsigned char *dst, int stride,
+                         const float block[64])
 {
     int i, j;
 
@@ -81,6 +83,28 @@ void bink2_add_block_f(unsigned char *dst, int stride, const float block[64])
         dst += stride;
         block += 8;
     }
+}
+
+/* The SIMD conversions round half to even, as lrintf does in the default
+ * rounding mode, and saturate where lrintf's result would not fit an int.
+ * KB2f block values are far inside that range: AC levels are at most about
+ * 2^10, scaled by at most 128 and a matrix entry near 1. */
+void bink2_put_block_f(unsigned char *dst, int stride, const float block[64])
+{
+#if defined(BINK2_SIMD_FLOAT_BLOCK)
+    BINK2_SIMD(bink2_put_block_f)(dst, stride, block);
+#else
+    bink2_put_block_f_c(dst, stride, block);
+#endif
+}
+
+void bink2_add_block_f(unsigned char *dst, int stride, const float block[64])
+{
+#if defined(BINK2_SIMD_FLOAT_BLOCK)
+    BINK2_SIMD(bink2_add_block_f)(dst, stride, block);
+#else
+    bink2_add_block_f_c(dst, stride, block);
+#endif
 }
 
 #define IDCT_MUL_A(val) ((val) + ((val) >> 2))
@@ -119,7 +143,7 @@ static void idct_1d_new(int16_t *blk, int step, int shift)
     blk[7 * step] = (int16_t)((tmp0  - tmp9)  >> shift);
 }
 
-void bink2_idct_new(int32_t block[64])
+void bink2_idct_new_c(int32_t block[64])
 {
     int16_t tmp[64];
     int i;
@@ -134,7 +158,8 @@ void bink2_idct_new(int32_t block[64])
         block[i] = tmp[i];
 }
 
-void bink2_put_block(unsigned char *dst, int stride, const int32_t block[64])
+void bink2_put_block_c(unsigned char *dst, int stride,
+                       const int32_t block[64])
 {
     int i, j;
 
@@ -145,7 +170,8 @@ void bink2_put_block(unsigned char *dst, int stride, const int32_t block[64])
     }
 }
 
-void bink2_add_block(unsigned char *dst, int stride, const int32_t block[64])
+void bink2_add_block_c(unsigned char *dst, int stride,
+                       const int32_t block[64])
 {
     int i, j;
 
@@ -154,6 +180,33 @@ void bink2_add_block(unsigned char *dst, int stride, const int32_t block[64])
             dst[j] = (unsigned char)clip8((int)dst[j] + block[j * 8 + i]);
         dst += stride;
     }
+}
+
+void bink2_idct_new(int32_t block[64])
+{
+#if defined(BINK2_SIMD)
+    BINK2_SIMD(bink2_idct_new)(block);
+#else
+    bink2_idct_new_c(block);
+#endif
+}
+
+void bink2_put_block(unsigned char *dst, int stride, const int32_t block[64])
+{
+#if defined(BINK2_SIMD)
+    BINK2_SIMD(bink2_put_block)(dst, stride, block);
+#else
+    bink2_put_block_c(dst, stride, block);
+#endif
+}
+
+void bink2_add_block(unsigned char *dst, int stride, const int32_t block[64])
+{
+#if defined(BINK2_SIMD)
+    BINK2_SIMD(bink2_add_block)(dst, stride, block);
+#else
+    bink2_add_block_c(dst, stride, block);
+#endif
 }
 
 #define EDGE_STRIDE 32
@@ -192,29 +245,34 @@ static void edge_copy(unsigned char *dst, const unsigned char *src,
       ((src)[-(i)] + (src)[2 * (i)]) * 2 + \
       (((src)[-2 * (i)] + (src)[3 * (i)]) >> 1) + 8) >> 4)
 
-void bink2_mc_luma(unsigned char *dst, int dst_stride,
-                   const unsigned char *src, int src_stride,
-                   int x, int y, int frame_w, int frame_h,
-                   int mvx, int mvy)
+/* Points *msrc at the reference block for (x, y) + mv/2, through a
+ * clamped copy in edge[] when the 6-tap filter would leave the frame. */
+static void luma_source(unsigned char edge[EDGE_STRIDE * 24],
+                        const unsigned char *src, int src_stride,
+                        int x, int y, int frame_w, int frame_h,
+                        int mvx, int mvy,
+                        const unsigned char **msrc, int *ss)
 {
-    unsigned char edge[EDGE_STRIDE * 24];
-    const unsigned char *msrc;
-    int ss = src_stride;
     int fw = (frame_w + 31) & ~31;
     int fh = (frame_h + 31) & ~31;
     int mx = x + (mvx >> 1);
     int my = y + (mvy >> 1);
-    int hmode = mvx & 1;
-    int vmode = mvy & 1;
-    int i, j;
 
     if (mx < 2 || my < 2 || mx + 19 > fw || my + 19 > fh) {
         edge_copy(edge, src, src_stride, mx - 2, my - 2, 21, 21, fw, fh);
-        msrc = edge + 2 + 2 * EDGE_STRIDE;
-        ss = EDGE_STRIDE;
+        *msrc = edge + 2 + 2 * EDGE_STRIDE;
+        *ss = EDGE_STRIDE;
     } else {
-        msrc = src + mx + my * src_stride;
+        *msrc = src + mx + my * src_stride;
+        *ss = src_stride;
     }
+}
+
+void bink2_mc_luma_block_c(unsigned char *dst, int dst_stride,
+                           const unsigned char *msrc, int ss,
+                           int hmode, int vmode)
+{
+    int i, j;
 
     if (hmode == 0 && vmode == 0) {
         for (j = 0; j < 16; j++) {
@@ -254,6 +312,39 @@ void bink2_mc_luma(unsigned char *dst, int dst_stride,
     }
 }
 
+void bink2_mc_luma_c(unsigned char *dst, int dst_stride,
+                     const unsigned char *src, int src_stride,
+                     int x, int y, int frame_w, int frame_h,
+                     int mvx, int mvy)
+{
+    unsigned char edge[EDGE_STRIDE * 24];
+    const unsigned char *msrc;
+    int ss;
+
+    luma_source(edge, src, src_stride, x, y, frame_w, frame_h, mvx, mvy,
+                &msrc, &ss);
+    bink2_mc_luma_block_c(dst, dst_stride, msrc, ss, mvx & 1, mvy & 1);
+}
+
+void bink2_mc_luma(unsigned char *dst, int dst_stride,
+                   const unsigned char *src, int src_stride,
+                   int x, int y, int frame_w, int frame_h,
+                   int mvx, int mvy)
+{
+    unsigned char edge[EDGE_STRIDE * 24];
+    const unsigned char *msrc;
+    int ss;
+
+    luma_source(edge, src, src_stride, x, y, frame_w, frame_h, mvx, mvy,
+                &msrc, &ss);
+#if defined(BINK2_SIMD)
+    BINK2_SIMD(bink2_mc_luma_block)(dst, dst_stride, msrc, ss, mvx & 1,
+                                    mvy & 1);
+#else
+    bink2_mc_luma_block_c(dst, dst_stride, msrc, ss, mvx & 1, mvy & 1);
+#endif
+}
+
 #define CH1_FILTER(src) (((src)[0] * 6 + (src)[1] * 2 + 4) >> 3)
 #define CH2_FILTER(src) (((src)[0] + (src)[1] + 1) >> 1)
 #define CH3_FILTER(src) (((src)[0] * 2 + (src)[1] * 6 + 4) >> 3)
@@ -289,29 +380,32 @@ static int chroma_v(int mode, const unsigned char *src, int stride)
     }
 }
 
-void bink2_mc_chroma(unsigned char *dst, int dst_stride,
-                     const unsigned char *src, int src_stride,
-                     int x, int y, int frame_w, int frame_h,
-                     int mvx, int mvy)
+static void chroma_source(unsigned char edge[EDGE_STRIDE * 24],
+                          const unsigned char *src, int src_stride,
+                          int x, int y, int frame_w, int frame_h,
+                          int mvx, int mvy,
+                          const unsigned char **msrc, int *ss)
 {
-    unsigned char edge[EDGE_STRIDE * 24];
-    const unsigned char *msrc;
-    int ss = src_stride;
     int fw = (frame_w + 15) & ~15;
     int fh = (frame_h + 15) & ~15;
     int mx = x + (mvx >> 2);
     int my = y + (mvy >> 2);
-    int hmode = mvx & 3;
-    int vmode = mvy & 3;
-    int i, j;
 
     if (mx < 0 || my < 0 || mx + 9 > fw || my + 9 > fh) {
         edge_copy(edge, src, src_stride, mx, my, 9, 9, fw, fh);
-        msrc = edge;
-        ss = EDGE_STRIDE;
+        *msrc = edge;
+        *ss = EDGE_STRIDE;
     } else {
-        msrc = src + mx + my * src_stride;
+        *msrc = src + mx + my * src_stride;
+        *ss = src_stride;
     }
+}
+
+void bink2_mc_chroma_block_c(unsigned char *dst, int dst_stride,
+                             const unsigned char *msrc, int ss,
+                             int hmode, int vmode)
+{
+    int i, j;
 
     if (hmode == 0 && vmode == 0) {
         for (j = 0; j < 8; j++) {
@@ -349,4 +443,82 @@ void bink2_mc_chroma(unsigned char *dst, int dst_stride,
             dst += dst_stride;
         }
     }
+}
+
+void bink2_mc_chroma_c(unsigned char *dst, int dst_stride,
+                       const unsigned char *src, int src_stride,
+                       int x, int y, int frame_w, int frame_h,
+                       int mvx, int mvy)
+{
+    unsigned char edge[EDGE_STRIDE * 24];
+    const unsigned char *msrc;
+    int ss;
+
+    chroma_source(edge, src, src_stride, x, y, frame_w, frame_h, mvx, mvy,
+                  &msrc, &ss);
+    bink2_mc_chroma_block_c(dst, dst_stride, msrc, ss, mvx & 3, mvy & 3);
+}
+
+void bink2_mc_chroma(unsigned char *dst, int dst_stride,
+                     const unsigned char *src, int src_stride,
+                     int x, int y, int frame_w, int frame_h,
+                     int mvx, int mvy)
+{
+    unsigned char edge[EDGE_STRIDE * 24];
+    const unsigned char *msrc;
+    int ss;
+
+    chroma_source(edge, src, src_stride, x, y, frame_w, frame_h, mvx, mvy,
+                  &msrc, &ss);
+#if defined(BINK2_SIMD)
+    BINK2_SIMD(bink2_mc_chroma_block)(dst, dst_stride, msrc, ss, mvx & 3,
+                                      mvy & 3);
+#else
+    bink2_mc_chroma_block_c(dst, dst_stride, msrc, ss, mvx & 3, mvy & 3);
+#endif
+}
+
+void bink2_yuv_row_c(unsigned char *rgb, const unsigned char *y,
+                     const unsigned char *u, const unsigned char *v,
+                     int width, int studio_range)
+{
+    int x;
+
+    for (x = 0; x < width; x++) {
+        int yy = y[x];
+        int uu = u[x / 2] - 128;
+        int vv = v[x / 2] - 128;
+        int r, g, b;
+
+        if (!studio_range) {
+            r = yy + ((359 * vv + 128) >> 8);
+            g = yy - ((88 * uu + 183 * vv + 128) >> 8);
+            b = yy + ((454 * uu + 128) >> 8);
+        } else {
+            int sy = yy - 16;
+
+            r = (298 * sy + 409 * vv + 128) >> 8;
+            g = (298 * sy - 100 * uu - 208 * vv + 128) >> 8;
+            b = (298 * sy + 516 * uu + 128) >> 8;
+        }
+        rgb[x * 3 + 0] = (unsigned char)clip8(r);
+        rgb[x * 3 + 1] = (unsigned char)clip8(g);
+        rgb[x * 3 + 2] = (unsigned char)clip8(b);
+    }
+}
+
+void bink2_yuv_row(unsigned char *rgb, const unsigned char *y,
+                   const unsigned char *u, const unsigned char *v,
+                   int width, int studio_range)
+{
+#if defined(BINK2_SIMD)
+    /* The SIMD body converts 16 pixels at a time; the tail is scalar. */
+    int done = BINK2_SIMD(bink2_yuv_row16)(rgb, y, u, v, width,
+                                           studio_range);
+
+    bink2_yuv_row_c(rgb + (size_t)done * 3, y + done, u + done / 2,
+                    v + done / 2, width - done, studio_range);
+#else
+    bink2_yuv_row_c(rgb, y, u, v, width, studio_range);
+#endif
 }

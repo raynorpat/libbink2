@@ -20,13 +20,27 @@ links the decoder, because the encoder reconstructs frames with decoder code.
 
 An installed tree provides `bink2.h`, `bink2_encoder.h`, `libbink2` and
 `libbink2enc.a`. No CMake package config or pkg-config file is installed, so
-link installed libraries by name (`-lbink2enc -lbink2 -lm`).
+link installed libraries by name (`-lbink2enc -lbink2 -lm`, plus
+`-lpthread` on Unix-likes when linking the static library).
 
 ## Threads
 
 Neither library keeps mutable global state. Separate decoder handles, and
 separate `bink2_enc_encode()` calls, can run on different threads at the same
 time. One handle must not be used from two threads at once.
+
+The decoder decodes a frame's slices in parallel. Each handle starts its own
+worker threads on the first frame with more than one slice, uses up to one
+thread per slice (the calling thread decodes one of them), and stops them in
+`bink2_close()`. `bink2_get_video()` splits its RGB conversion across the same
+threads. A file has 1 to 8 slices, chosen when it was encoded, so the
+speedup depends on the file. The output is identical to serial decoding.
+
+The thread count is capped at the number of online CPUs. Set the environment
+variable `BINK2_THREADS` to an integer from 1 to 64 to cap it instead;
+`BINK2_THREADS=1` decodes serially and starts no threads. The variable is read
+when a handle starts its threads, so set it before the first frame call. If
+the threads cannot be started, the handle decodes serially.
 
 ## Decoder (`bink2.h`)
 
@@ -134,7 +148,9 @@ Things to know:
 ### Frame data
 
 Returned pointers belong to the decoder and are valid until the next frame
-call or `bink2_close()`.
+call or `bink2_close()`. Fetch them again after every frame: the Y, U and V
+planes alternate between two buffers, so a pointer kept from an earlier frame
+points at an older picture.
 
 | Function | Returns |
 | --- | --- |
