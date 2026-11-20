@@ -329,6 +329,34 @@ static int test_packet_growth(void)
     return 0;
 }
 
+/* One huge packet must not pin its buffer for the handle's lifetime: a
+ * later normal-sized packet releases it. */
+static int test_packet_shrinks(void)
+{
+    Packet k[2];
+    unsigned long w, h, flags;
+    int version;
+    size_t huge = (size_t)8 << 20;
+    unsigned char *junk = (unsigned char *)calloc(1, huge);
+    Bink2Video v;
+
+    CHECK(junk != NULL);
+    CHECK(load_keyframes(k, &w, &h, &flags, &version) == 0);
+    CHECK(bink2_video_init(&v, w, h, flags, version) == 0);
+    (void)bink2_video_decode(&v, junk, huge, 1);
+    CHECK(v.packet_capacity >= huge);
+    CHECK(bink2_video_decode(&v, k[0].data, k[0].size, 1) == 0);
+    CHECK(v.packet_capacity <= ((size_t)1 << 20));
+    /* Small packets do not reallocate every frame. */
+    CHECK(bink2_video_decode(&v, k[1].data, k[1].size, 1) == 0);
+    CHECK(v.packet_capacity >= k[0].size + 8);
+    bink2_video_uninit(&v);
+    free(junk);
+    free(k[0].data);
+    free(k[1].data);
+    return 0;
+}
+
 int main(void)
 {
     CHECK(test_geometry() == 0);
@@ -338,5 +366,6 @@ int main(void)
     CHECK(test_mc_identity() == 0);
     CHECK(test_mc_edge() == 0);
     CHECK(test_packet_growth() == 0);
+    CHECK(test_packet_shrinks() == 0);
     return 0;
 }

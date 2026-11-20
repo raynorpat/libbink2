@@ -469,6 +469,8 @@ static int decode_impl(Bink2Video *v, const unsigned char *data,
     return 0;
 }
 
+#define BINK2_PACKET_KEEP ((size_t)1 << 20)
+
 int bink2_video_decode(Bink2Video *v, const unsigned char *data, size_t size,
                        int is_keyframe)
 {
@@ -479,12 +481,18 @@ int bink2_video_decode(Bink2Video *v, const unsigned char *data, size_t size,
         return BINK2_ERROR;
     if (size > (size_t)-1 - 8)
         return BINK2_ERROR;
-    if (v->packet_capacity < size + 8) {
+    /* Grow to fit; shrink again once a single large packet has passed, so
+     * one oversized frame does not pin its buffer until close. */
+    if (v->packet_capacity < size + 8 ||
+        (v->packet_capacity > BINK2_PACKET_KEEP &&
+         v->packet_capacity / 4 > size + 8)) {
         padded = (unsigned char *)realloc(v->packet, size + 8);
-        if (padded == NULL)
+        if (padded != NULL) {
+            v->packet = padded;
+            v->packet_capacity = size + 8;
+        } else if (v->packet_capacity < size + 8) {
             return BINK2_ERROR;
-        v->packet = padded;
-        v->packet_capacity = size + 8;
+        }
     }
     padded = v->packet;
     memcpy(padded, data, size);
