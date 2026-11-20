@@ -118,6 +118,10 @@ if(TARGET bink2_encoder)
     BINK2_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/media")
   add_test(NAME enc_image COMMAND test_enc_image)
 
+  add_executable(test_threads test_threads.c)
+  target_link_libraries(test_threads PRIVATE bink2_encoder)
+  add_test(NAME threads COMMAND test_threads)
+
   add_executable(test_enc_options test_enc_options.c)
   target_link_libraries(test_enc_options PRIVATE bink2_encoder)
   add_test(NAME enc_options COMMAND test_enc_options)

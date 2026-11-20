@@ -219,6 +219,7 @@ void bink2_video_uninit(Bink2Video *v)
     }
     free(v->rgb);
     free(v->packet);
+    bink2_pool_destroy(v->pool);
     memset(v, 0, sizeof(*v));
 }
 
@@ -296,6 +297,79 @@ int bink2_video_slice_heights(int version, unsigned long flags,
     }
 }
 
+typedef struct {
+    Bink2Video *v;
+    const unsigned char *data;
+    size_t padded_size;
+    int is_keyframe;
+    int y0[BINK2_MAX_SLICES];
+    int y1[BINK2_MAX_SLICES];
+    unsigned long start[BINK2_MAX_SLICES];  /* first bit of each slice */
+    unsigned long end[BINK2_MAX_SLICES];    /* bit after each slice */
+    int status[BINK2_MAX_SLICES];
+} SliceJobs;
+
+/* Decodes slice i with its own reader and prediction state. Slices write
+ * disjoint macroblock rows and read only the finished reference. */
+static void decode_slice_job(void *arg, int i)
+{
+    SliceJobs *jobs = (SliceJobs *)arg;
+    Bink2Video *v = jobs->v;
+    Bink2Bits bits;
+
+    bink2_bits_init(&bits, jobs->data, jobs->padded_size);
+    bits.bitpos = jobs->start[i];
+    if (v->version <= 'f')
+        jobs->status[i] = bink2_video_decode_slice_old(v, &v->slice[i], &bits,
+                                                       jobs->is_keyframe,
+                                                       jobs->y0[i],
+                                                       jobs->y1[i]);
+    else
+        jobs->status[i] = bink2_video_decode_slice_new(v, &v->slice[i], &bits,
+                                                       jobs->is_keyframe,
+                                                       jobs->y0[i],
+                                                       jobs->y1[i]);
+    jobs->end[i] = (unsigned long)bits.bitpos;
+}
+
+/* How many threads decode a frame of num_slices slices. Starts the pool
+ * the first time it is needed; if it cannot start, decoding is serial. */
+static int slice_threads(Bink2Video *v, int num_slices)
+{
+    int limit = v->thread_limit;
+    int want;
+
+    if (v->pool != NULL)
+        return v->pool_workers + 1 < num_slices ? v->pool_workers + 1
+                                                : num_slices;
+    if (v->pool_workers < 0 || num_slices < 2)
+        return 1;
+    if (limit == 0)
+        limit = bink2_env_thread_limit();
+    if (limit == 0)
+        limit = bink2_cpu_count();
+    want = limit < num_slices ? limit : num_slices;
+    if (want < 2)
+        return 1;
+    v->pool = bink2_pool_create(want - 1);
+    if (v->pool == NULL) {
+        v->pool_workers = -1;
+        return 1;
+    }
+    v->pool_workers = want - 1;
+    return want;
+}
+
+void bink2_video_set_threads(Bink2Video *v, int n)
+{
+    if (v == NULL || n < 0 || n == v->thread_limit)
+        return;
+    bink2_pool_destroy(v->pool);
+    v->pool = NULL;
+    v->pool_workers = 0;
+    v->thread_limit = n;
+}
+
 static int decode_impl(Bink2Video *v, const unsigned char *data,
                        size_t real_size, size_t padded_size, int is_keyframe)
 {
@@ -303,6 +377,8 @@ static int decode_impl(Bink2Video *v, const unsigned char *data,
     unsigned long frame_flags;
     int num_slices;
     int slice_height[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
+    SliceJobs jobs;
+    int threads;
     int i;
 
     /* The last picture becomes the reference by swapping pointers: every
@@ -348,38 +424,51 @@ static int decode_impl(Bink2Video *v, const unsigned char *data,
         }
     }
 
+    /* Every slice start is known up front: slice 0 follows the header,
+     * the others are at their stored offsets. Reject what the serial walk
+     * would reject before it reached that slice. */
+    jobs.v = v;
+    jobs.data = data;
+    jobs.padded_size = padded_size;
+    jobs.is_keyframe = is_keyframe;
     for (i = 0; i < num_slices; i++) {
-        int y0 = i == 0 ? 0 : slice_height[i - 1];
-        int y1 = slice_height[i];
-
-        if (i > 0) {
-            unsigned long target;
-
-            bink2_bits_align32(&bits);
-            target = le32(data + 4 + 4UL * (unsigned long)(i - 1)) * 8UL;
-            if (target < bits.bitpos ||
-                target > (unsigned long)real_size * 8UL)
-                return BINK2_ERROR;
-            if (target - bits.bitpos > 0x7FFFFFFFUL)
-                return BINK2_ERROR;
-            bink2_bits_skip(&bits, (int)(target - bits.bitpos));
-        }
-        if (v->version <= 'f') {
-            if (bink2_video_decode_slice_old(v, &v->slice[i], &bits,
-                                             is_keyframe,
-                                             y0, y1) != 0)
-                return BINK2_ERROR;
+        jobs.y0[i] = i == 0 ? 0 : slice_height[i - 1];
+        jobs.y1[i] = slice_height[i];
+        if (i == 0) {
+            jobs.start[i] = bits.bitpos;
         } else {
-            if (bink2_video_decode_slice_new(v, &v->slice[i], &bits,
-                                             is_keyframe,
-                                             y0, y1) != 0)
+            unsigned long target =
+                le32(data + 4 + 4UL * (unsigned long)(i - 1)) * 8UL;
+
+            if (target > (unsigned long)real_size * 8UL ||
+                target < jobs.start[i - 1])
                 return BINK2_ERROR;
+            jobs.start[i] = target;
         }
     }
 
-    /* A valid frame may rely on a few implicit zero bits after the last
-     * byte. More than 64 means the packet was truncated. */
-    if (bits.bitpos > real_size * 8UL + 64UL)
+    threads = slice_threads(v, num_slices);
+    if (threads > 1)
+        bink2_pool_run(v->pool, decode_slice_job, &jobs, num_slices);
+    else
+        for (i = 0; i < num_slices; i++)
+            decode_slice_job(&jobs, i);
+
+    /* The checks the serial walk makes between slices: each slice must end
+     * at or before the next one's start, and a valid frame may rely on a
+     * few implicit zero bits after the last byte. More than 64 means the
+     * packet was truncated. */
+    for (i = 0; i < num_slices; i++) {
+        if (jobs.status[i] != 0)
+            return BINK2_ERROR;
+        if (i > 0) {
+            unsigned long end = (jobs.end[i - 1] + 31UL) & ~31UL;
+
+            if (jobs.start[i] < end || jobs.start[i] - end > 0x7FFFFFFFUL)
+                return BINK2_ERROR;
+        }
+    }
+    if (jobs.end[num_slices - 1] > real_size * 8UL + 64UL)
         return BINK2_ERROR;
 
     if (v->cur[3] != NULL && v->ref[3] != NULL)

@@ -3,6 +3,7 @@
 
 #include "bink2.h"
 #include "bink2_bits.h"
+#include "bink2_thread.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -68,12 +69,18 @@ typedef struct Bink2Video {
 
     uint32_t frame_flags;
     Bink2Slice slice[BINK2_MAX_SLICES];
+
+    Bink2Pool *pool;    /* started on the first multi-slice frame */
+    int pool_workers;   /* -1 after the pool failed to start */
+    int thread_limit;   /* 0 = BINK2_THREADS or the CPU count */
 } Bink2Video;
 
 int bink2_video_init(Bink2Video *v, unsigned long width, unsigned long height,
                      unsigned long flags, int version);
 void bink2_video_uninit(Bink2Video *v);
 void bink2_video_reset(Bink2Video *v);
+/* 0 = automatic, 1 = serial, n > 1 = up to n threads per frame. */
+void bink2_video_set_threads(Bink2Video *v, int n);
 void bink2_video_reset_slice(const Bink2Video *v, Bink2Slice *s);
 int bink2_video_decode(Bink2Video *v, const unsigned char *data, size_t size,
                        int is_keyframe);

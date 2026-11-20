@@ -429,8 +429,18 @@ static int ensure_video(bink2 object)
             object->video = NULL;
             return -1;
         }
+        bink2_video_set_threads(object->video, object->thread_limit);
     }
     return 0;
+}
+
+void bink2_internal_set_threads(bink2 object, int n)
+{
+    if (object == NULL || n < 0)
+        return;
+    object->thread_limit = n;
+    if (object->video != NULL)
+        bink2_video_set_threads(object->video, n);
 }
 
 static void reset_audio(bink2 object)

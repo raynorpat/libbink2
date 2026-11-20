@@ -31,14 +31,17 @@ docs/                format notes, API and tool reference
 | `bink2_dsp.c/.h` | IDCTs and block put/add. |
 | `bink2_tables.c/.h` | Codebooks, scan orders, quantiser matrices. |
 | `bink2_audio.c/.h` | Bink Audio 2. |
+| `bink2_thread.c/.h` | The slice thread pool (POSIX or Win32 threads), CPU count, `BINK2_THREADS`. |
 
 A frame call flows like this:
 
 1. `bink2.c` reads the frame packet using the index.
 2. The packet is split into one audio chunk per track, then the video
    payload.
-3. `bink2_video_decode()` reads the frame flags and slice offsets, then calls
-   the old or new slice decoder per slice depending on the revision.
+3. `bink2_video_decode()` reads the frame flags and slice offsets, then runs
+   the old or new slice decoder for every slice, on the handle's thread pool
+   when the frame has more than one slice. It then checks that each slice
+   ended before the next one starts, as a serial walk would.
 4. Each enabled audio track decodes its chunk.
 
 Decoded planes are padded to 32-sample macroblock boundaries; the public
@@ -103,6 +106,14 @@ first row. A slice writes only its own macroblock rows of the current picture
 and the motion arrays, and reads the reference picture, which is complete
 before the frame starts. The encoder, which codes one slice at a time, uses
 `slice[0]`.
+
+That is what lets slices run in parallel: `decode_impl()` validates every
+slice offset, hands each slice its own bit reader on a `Bink2Pool`, and after
+joining applies the same between-slice and end-of-packet checks the serial
+walk did, so a damaged frame fails identically either way. The pool is
+created lazily, so a `Bink2Video` that never decodes (the encoder's) never
+starts threads. `test_threads` compares threaded and serial output frame by
+frame.
 
 ### Untrusted input
 

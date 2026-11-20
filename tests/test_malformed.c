@@ -1,4 +1,5 @@
 #include "bink2.h"
+#include "bink2_internal.h"
 #include "test_common.h"
 
 static void w32(unsigned char *p, unsigned long v)
@@ -353,7 +354,7 @@ static uint64_t picture_hash(bink2 b)
 
 /* A failed inter frame leaves the previous picture visible, and decoding
  * resumes correctly from a keyframe and from a rewind afterwards. */
-static int test_error_then_recover(void)
+static int test_error_then_recover(int threads)
 {
     unsigned char *buf;
     size_t size;
@@ -366,6 +367,7 @@ static int test_error_then_recover(void)
     b = bink2_open_memory(buf, (unsigned long)size);
     CHECK(b != NULL);
     bink2_enable_video(b, 1);
+    bink2_internal_set_threads(b, threads);
     CHECK(bink2_first(b) != BINK2_ERROR);
     good[0] = picture_hash(b);
     for (i = 1; i < 32; i++) {
@@ -382,6 +384,7 @@ static int test_error_then_recover(void)
     b = bink2_open_memory(buf, (unsigned long)size);
     CHECK(b != NULL);
     bink2_enable_video(b, 1);
+    bink2_internal_set_threads(b, threads);
     CHECK(bink2_first(b) != BINK2_ERROR);
     CHECK(picture_hash(b) == good[0]);
     CHECK(bink2_next(b) == BINK2_ERROR);
@@ -397,13 +400,137 @@ static int test_error_then_recover(void)
     return 0;
 }
 
+typedef struct {
+    int status[2];
+    uint64_t hash[2];
+} DecodeResult;
+
+/* Decodes frames 0 and 1 of buf with the given thread count. */
+static int decode_two(const unsigned char *buf, size_t size, int threads,
+                      DecodeResult *r)
+{
+    bink2 b = bink2_open_memory(buf, (unsigned long)size);
+
+    if (b == NULL)
+        return -1;
+    bink2_enable_video(b, 1);
+    bink2_internal_set_threads(b, threads);
+    r->status[0] = bink2_first(b);
+    r->hash[0] = picture_hash(b);
+    r->status[1] = r->status[0] == BINK2_ERROR ? BINK2_ERROR : bink2_next(b);
+    r->hash[1] = picture_hash(b);
+    bink2_close(b);
+    return 0;
+}
+
+/* Serial and threaded decoding agree on the result and on the picture left
+ * behind. A failed first frame has no previous picture to restore, so its
+ * contents are only compared on success. */
+static int same_in_both_modes(const unsigned char *buf, size_t size)
+{
+    DecodeResult serial, threaded;
+
+    CHECK(decode_two(buf, size, 1, &serial) == 0);
+    CHECK(decode_two(buf, size, 8, &threaded) == 0);
+    CHECK(serial.status[0] == threaded.status[0]);
+    if (serial.status[0] != BINK2_ERROR) {
+        CHECK(serial.hash[0] == threaded.hash[0]);
+        CHECK(serial.status[1] == threaded.status[1]);
+        CHECK(serial.hash[1] == threaded.hash[1]);
+    }
+    return 0;
+}
+
+/* Slice 2 starts inside slice 1, so slice 1 runs past it. */
+static int test_slice_overlap(void)
+{
+    unsigned char *buf;
+    size_t size;
+    unsigned long frame0;
+    DecodeResult r;
+
+    buf = load_fixture(&size);
+    CHECK(buf != NULL);
+    frame0 = le32(buf + 48) & ~1UL;
+    w32(buf + frame0 + 8, le32(buf + frame0 + 4) + 4);
+    CHECK(decode_two(buf, size, 1, &r) == 0);
+    CHECK(r.status[0] == BINK2_ERROR);
+    CHECK(decode_two(buf, size, 8, &r) == 0);
+    CHECK(r.status[0] == BINK2_ERROR);
+    free(buf);
+    return 0;
+}
+
+/* Slice 3's offset is below slice 2's. */
+static int test_slice_offset_backwards(void)
+{
+    unsigned char *buf;
+    size_t size;
+    unsigned long frame0;
+    DecodeResult r;
+
+    buf = load_fixture(&size);
+    CHECK(buf != NULL);
+    frame0 = le32(buf + 48) & ~1UL;
+    w32(buf + frame0 + 12, le32(buf + frame0 + 8) - 4);
+    CHECK(decode_two(buf, size, 1, &r) == 0);
+    CHECK(r.status[0] == BINK2_ERROR);
+    CHECK(decode_two(buf, size, 8, &r) == 0);
+    CHECK(r.status[0] == BINK2_ERROR);
+    free(buf);
+    return 0;
+}
+
+/* Single-byte corruptions in the slice data of frames 0 and 1. */
+static int test_threaded_fuzz(void)
+{
+    unsigned char *orig, *buf;
+    size_t size;
+    unsigned long frame[3];
+    unsigned long seed = 1;
+    int i, f;
+
+    orig = load_fixture(&size);
+    CHECK(orig != NULL);
+    buf = (unsigned char *)malloc(size);
+    CHECK(buf != NULL);
+    for (f = 0; f < 3; f++)
+        frame[f] = le32(orig + 48 + 4 * f) & ~1UL;
+    for (f = 0; f < 2; f++) {
+        unsigned long start = frame[f] + 16;
+        unsigned long len = frame[f + 1] - start;
+
+        for (i = 0; i < 150; i++) {
+            unsigned long pos;
+
+            seed = seed * 1103515245UL + 12345UL;
+            pos = start + (seed >> 8) % len;
+            memcpy(buf, orig, size);
+            buf[pos] ^= (unsigned char)(1u << ((seed >> 4) & 7));
+            if (same_in_both_modes(buf, size) != 0) {
+                fprintf(stderr, "frame %d byte %lu\n", f, pos);
+                free(buf);
+                free(orig);
+                return 1;
+            }
+        }
+    }
+    free(buf);
+    free(orig);
+    return 0;
+}
+
 int main(void)
 {
     CHECK(test_header_rejects() == 0);
     CHECK(test_slice_memory() == 0);
     CHECK(test_truncated_video() == 0);
     CHECK(test_slice_offset() == 0);
-    CHECK(test_error_then_recover() == 0);
+    CHECK(test_error_then_recover(1) == 0);
+    CHECK(test_error_then_recover(8) == 0);
+    CHECK(test_slice_overlap() == 0);
+    CHECK(test_slice_offset_backwards() == 0);
+    CHECK(test_threaded_fuzz() == 0);
     CHECK(test_seek_clamp() == 0);
     CHECK(test_audio_overrun() == 0);
     CHECK(test_audio_truncated_prefix() == 0);

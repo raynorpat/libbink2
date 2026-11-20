@@ -60,8 +60,12 @@ struct bink2_t {
     unsigned long current_frame;
     unsigned char video_enabled;
     struct Bink2Video *video;
+    int thread_limit;   /* see bink2_internal_set_threads */
 };
 
 int bink2_internal_load_frame(bink2 object, unsigned long frame);
+/* Slice threads per frame: 0 = automatic (BINK2_THREADS, else the CPU
+ * count), 1 = serial, n > 1 = up to n. For tests and tools. */
+void bink2_internal_set_threads(bink2 object, int n);
 
 #endif

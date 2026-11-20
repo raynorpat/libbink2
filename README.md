@@ -14,7 +14,9 @@ The decoder and tools are implemented:
   syntax is ported; decoding them half-written would corrupt every plane.
 - Bink Audio 2, up to seven tracks.
 - Keyframe seeking and a 2 GB file ceiling.
-- `bink2_dump`, `bink2_build` (images to `.bk2`, optional WAV audio), and SDL
+- Multithreaded decoding: a frame's slices decode in parallel, up to one
+  thread per slice (`BINK2_THREADS` caps it; see `docs/api.md`).
+- `bink2_dump`, `bink2_bench`, `bink2_build` (images to `.bk2`, optional WAV audio), and SDL
   players for the renderer, OpenGL, Metal, and Vulkan, plus Direct3D 9/11
   players on Windows.
 
