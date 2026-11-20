@@ -511,5 +511,14 @@ void bink2_yuv_row(unsigned char *rgb, const unsigned char *y,
                    const unsigned char *u, const unsigned char *v,
                    int width, int studio_range)
 {
+#if defined(BINK2_SIMD)
+    /* The SIMD body converts 16 pixels at a time; the tail is scalar. */
+    int done = BINK2_SIMD(bink2_yuv_row16)(rgb, y, u, v, width,
+                                           studio_range);
+
+    bink2_yuv_row_c(rgb + (size_t)done * 3, y + done, u + done / 2,
+                    v + done / 2, width - done, studio_range);
+#else
     bink2_yuv_row_c(rgb, y, u, v, width, studio_range);
+#endif
 }

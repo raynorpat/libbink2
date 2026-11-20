@@ -179,6 +179,58 @@ static int test_block_f(void)
     return 0;
 }
 
+/* Every width from 1 to 70 and 333, both ranges, from exact-size heap
+ * rows so ASan sees any read past a row. */
+static int yuv_case(int width, int studio)
+{
+    int cw = (width + 1) / 2;
+    unsigned char *y = (unsigned char *)malloc((size_t)width);
+    unsigned char *u = (unsigned char *)malloc((size_t)cw);
+    unsigned char *v = (unsigned char *)malloc((size_t)cw);
+    unsigned char *ra = (unsigned char *)malloc((size_t)width * 3);
+    unsigned char *rb = (unsigned char *)malloc((size_t)width * 3);
+    int i, ok;
+
+    CHECK(y != NULL && u != NULL && v != NULL && ra != NULL && rb != NULL);
+    for (i = 0; i < width; i++)
+        y[i] = (unsigned char)next_rand();
+    for (i = 0; i < cw; i++) {
+        u[i] = (unsigned char)next_rand();
+        v[i] = (unsigned char)next_rand();
+    }
+    /* Extremes of every channel. */
+    if (width >= 4) {
+        y[0] = 0;
+        y[1] = 255;
+        u[0] = 0;
+        v[1] = 255;
+    }
+    bink2_yuv_row(ra, y, u, v, width, studio);
+    bink2_yuv_row_c(rb, y, u, v, width, studio);
+    ok = memcmp(ra, rb, (size_t)width * 3) == 0;
+    if (!ok)
+        fprintf(stderr, "yuv width=%d studio=%d\n", width, studio);
+    free(y);
+    free(u);
+    free(v);
+    free(ra);
+    free(rb);
+    return ok ? 0 : 1;
+}
+
+static int test_yuv_row(void)
+{
+    int width, studio, round;
+
+    for (round = 0; round < 20; round++)
+        for (studio = 0; studio < 2; studio++) {
+            for (width = 1; width <= 70; width++)
+                CHECK(yuv_case(width, studio) == 0);
+            CHECK(yuv_case(333, studio) == 0);
+        }
+    return 0;
+}
+
 int main(void)
 {
     CHECK(test_idct_new() == 0);
@@ -186,5 +238,6 @@ int main(void)
     CHECK(test_mc_luma() == 0);
     CHECK(test_mc_chroma() == 0);
     CHECK(test_block_f() == 0);
+    CHECK(test_yuv_row() == 0);
     return 0;
 }

@@ -2,6 +2,8 @@
  * bink2_dsp.c bit for bit; tests/test_dsp_simd.c checks that. */
 #include "bink2_dsp.h"
 
+#include <stddef.h>
+
 #if defined(BINK2_SIMD_NEON)
 
 #include <arm_neon.h>
@@ -273,6 +275,75 @@ void bink2_mc_chroma_block_neon(unsigned char *dst, int dst_stride,
     for (j = 0; j < 8; j++)
         vst1_u8(dst + (long)j * dst_stride,
                 chroma_tap(rows[j], rows[j + 1], vmode));
+}
+
+/* YUV to RGB for four pixels in 32-bit lanes; yy is luma, uu and vv are
+ * chroma - 128. Matches bink2_yuv_row_c's integer formulas exactly. */
+static void yuv4(int32x4_t yy, int32x4_t uu, int32x4_t vv, int studio,
+                 int32x4_t *r, int32x4_t *g, int32x4_t *b)
+{
+    const int32x4_t half = vdupq_n_s32(128);
+
+    if (!studio) {
+        *r = vaddq_s32(yy, vshrq_n_s32(vmlaq_n_s32(half, vv, 359), 8));
+        *g = vsubq_s32(yy, vshrq_n_s32(
+                 vmlaq_n_s32(vmlaq_n_s32(half, uu, 88), vv, 183), 8));
+        *b = vaddq_s32(yy, vshrq_n_s32(vmlaq_n_s32(half, uu, 454), 8));
+    } else {
+        int32x4_t sy = vmlaq_n_s32(half, vsubq_s32(yy, vdupq_n_s32(16)),
+                                   298);
+
+        *r = vshrq_n_s32(vmlaq_n_s32(sy, vv, 409), 8);
+        *g = vshrq_n_s32(vmlaq_n_s32(vmlaq_n_s32(sy, uu, -100), vv, -208),
+                         8);
+        *b = vshrq_n_s32(vmlaq_n_s32(sy, uu, 516), 8);
+    }
+}
+
+static uint8x8_t clamp8(int32x4_t lo, int32x4_t hi)
+{
+    return vqmovun_s16(vcombine_s16(vqmovn_s32(lo), vqmovn_s32(hi)));
+}
+
+int bink2_yuv_row16_neon(unsigned char *rgb, const unsigned char *y,
+                         const unsigned char *u, const unsigned char *v,
+                         int width, int studio_range)
+{
+    const int16x8_t bias = vdupq_n_s16(128);
+    int x;
+
+    for (x = 0; x + 16 <= width; x += 16) {
+        uint8x16_t ly = vld1q_u8(y + x);
+        uint8x8x2_t du = vzip_u8(vld1_u8(u + x / 2), vld1_u8(u + x / 2));
+        uint8x8x2_t dv = vzip_u8(vld1_u8(v + x / 2), vld1_u8(v + x / 2));
+        uint8x8_t ry[2], gy[2], by[2];
+        uint8x16x3_t out;
+        int h;
+
+        for (h = 0; h < 2; h++) {
+            uint8x8_t y8 = h ? vget_high_u8(ly) : vget_low_u8(ly);
+            int16x8_t y16 = vreinterpretq_s16_u16(vmovl_u8(y8));
+            int16x8_t u16 = vsubq_s16(
+                vreinterpretq_s16_u16(vmovl_u8(du.val[h])), bias);
+            int16x8_t v16 = vsubq_s16(
+                vreinterpretq_s16_u16(vmovl_u8(dv.val[h])), bias);
+            int32x4_t r0, g0, b0, r1, g1, b1;
+
+            yuv4(vmovl_s16(vget_low_s16(y16)), vmovl_s16(vget_low_s16(u16)),
+                 vmovl_s16(vget_low_s16(v16)), studio_range, &r0, &g0, &b0);
+            yuv4(vmovl_s16(vget_high_s16(y16)),
+                 vmovl_s16(vget_high_s16(u16)),
+                 vmovl_s16(vget_high_s16(v16)), studio_range, &r1, &g1, &b1);
+            ry[h] = clamp8(r0, r1);
+            gy[h] = clamp8(g0, g1);
+            by[h] = clamp8(b0, b1);
+        }
+        out.val[0] = vcombine_u8(ry[0], ry[1]);
+        out.val[1] = vcombine_u8(gy[0], gy[1]);
+        out.val[2] = vcombine_u8(by[0], by[1]);
+        vst3q_u8(rgb + (size_t)x * 3, out);
+    }
+    return x;
 }
 
 #if defined(BINK2_SIMD_FLOAT_BLOCK)

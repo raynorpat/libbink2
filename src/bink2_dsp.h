@@ -92,6 +92,11 @@ void BINK2_SIMD(bink2_mc_luma_block)(unsigned char *dst, int dst_stride,
 void BINK2_SIMD(bink2_mc_chroma_block)(unsigned char *dst, int dst_stride,
                                        const unsigned char *src,
                                        int src_stride, int hmode, int vmode);
+/* Converts the first (width & ~15) pixels of a row and returns that
+ * count; reads no sample past them. */
+int BINK2_SIMD(bink2_yuv_row16)(unsigned char *rgb, const unsigned char *y,
+                                const unsigned char *u, const unsigned char *v,
+                                int width, int studio_range);
 #endif
 #if defined(BINK2_SIMD_FLOAT_BLOCK)
 void BINK2_SIMD(bink2_put_block_f)(unsigned char *dst, int stride,

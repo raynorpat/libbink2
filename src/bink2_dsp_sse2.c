@@ -2,6 +2,8 @@
  * bink2_dsp.c bit for bit; tests/test_dsp_simd.c checks that. */
 #include "bink2_dsp.h"
 
+#include <stddef.h>
+
 #if defined(BINK2_SIMD_SSE2)
 
 #include <emmintrin.h>
@@ -180,11 +182,15 @@ void bink2_add_block_sse2(unsigned char *dst, int stride,
     }
 }
 
+static __m128i load8(const unsigned char *p)
+{
+    return _mm_loadl_epi64((const __m128i *)(const void *)p);
+}
+
 /* Eight samples at p, zero-extended to 16-bit lanes. */
 static __m128i load8w(const unsigned char *p)
 {
-    return _mm_unpacklo_epi8(_mm_loadl_epi64((const __m128i *)(const void *)p),
-                             _mm_setzero_si128());
+    return _mm_unpacklo_epi8(load8(p), _mm_setzero_si128());
 }
 
 /* Luma 6-tap half-pel filter on eight 16-bit lanes, taps at -2..3:
@@ -318,6 +324,110 @@ void bink2_mc_chroma_block_sse2(unsigned char *dst, int dst_stride,
     for (j = 0; j < 8; j++)
         store8w(dst + (long)j * dst_stride,
                 chroma_tap(rows[j], rows[j + 1], vmode));
+}
+
+/* (a * ca + b * cb) for four pixels: lanes 0..3 or 4..7 of a and b, via
+ * the pairwise multiply-add, since SSE2 has no 32-bit multiply. */
+static __m128i madd_lo(__m128i a, __m128i b, __m128i coef)
+{
+    return _mm_madd_epi16(_mm_unpacklo_epi16(a, b), coef);
+}
+
+static __m128i madd_hi(__m128i a, __m128i b, __m128i coef)
+{
+    return _mm_madd_epi16(_mm_unpackhi_epi16(a, b), coef);
+}
+
+static __m128i pair(short ca, short cb)
+{
+    return _mm_set_epi16(cb, ca, cb, ca, cb, ca, cb, ca);
+}
+
+/* Eight pixels: y in 16-bit lanes, u and v - 128 in 16-bit lanes. The
+ * formulas are bink2_yuv_row_c's, term for term. */
+static void yuv8(__m128i y, __m128i u, __m128i v, int studio,
+                 __m128i *r, __m128i *g, __m128i *b)
+{
+    const __m128i one = _mm_set1_epi16(1);
+    const __m128i half = _mm_set1_epi32(128);
+    __m128i rl, rh, gl, gh, bl, bh;
+
+    if (!studio) {
+        __m128i yl = madd_lo(y, one, pair(1, 0));
+        __m128i yh = madd_hi(y, one, pair(1, 0));
+
+        rl = _mm_add_epi32(yl, _mm_srai_epi32(madd_lo(v, one, pair(359, 128)),
+                                              8));
+        rh = _mm_add_epi32(yh, _mm_srai_epi32(madd_hi(v, one, pair(359, 128)),
+                                              8));
+        gl = _mm_sub_epi32(yl, _mm_srai_epi32(_mm_add_epi32(
+                 madd_lo(u, v, pair(88, 183)), half), 8));
+        gh = _mm_sub_epi32(yh, _mm_srai_epi32(_mm_add_epi32(
+                 madd_hi(u, v, pair(88, 183)), half), 8));
+        bl = _mm_add_epi32(yl, _mm_srai_epi32(madd_lo(u, one, pair(454, 128)),
+                                              8));
+        bh = _mm_add_epi32(yh, _mm_srai_epi32(madd_hi(u, one, pair(454, 128)),
+                                              8));
+    } else {
+        __m128i sy = _mm_sub_epi16(y, _mm_set1_epi16(16));
+
+        rl = _mm_srai_epi32(_mm_add_epi32(madd_lo(sy, v, pair(298, 409)),
+                                          half), 8);
+        rh = _mm_srai_epi32(_mm_add_epi32(madd_hi(sy, v, pair(298, 409)),
+                                          half), 8);
+        gl = _mm_srai_epi32(_mm_add_epi32(madd_lo(sy, u, pair(298, -100)),
+                                          madd_lo(v, one, pair(-208, 128))),
+                            8);
+        gh = _mm_srai_epi32(_mm_add_epi32(madd_hi(sy, u, pair(298, -100)),
+                                          madd_hi(v, one, pair(-208, 128))),
+                            8);
+        bl = _mm_srai_epi32(_mm_add_epi32(madd_lo(sy, u, pair(298, 516)),
+                                          half), 8);
+        bh = _mm_srai_epi32(_mm_add_epi32(madd_hi(sy, u, pair(298, 516)),
+                                          half), 8);
+    }
+    *r = _mm_packs_epi32(rl, rh);
+    *g = _mm_packs_epi32(gl, gh);
+    *b = _mm_packs_epi32(bl, bh);
+}
+
+int bink2_yuv_row16_sse2(unsigned char *rgb, const unsigned char *y,
+                         const unsigned char *u, const unsigned char *v,
+                         int width, int studio_range)
+{
+    const __m128i zero = _mm_setzero_si128();
+    const __m128i bias = _mm_set1_epi16(128);
+    int x;
+
+    for (x = 0; x + 16 <= width; x += 16) {
+        __m128i ly = load16(y + x);
+        __m128i u8 = load8(u + x / 2);
+        __m128i v8 = load8(v + x / 2);
+        __m128i du = _mm_unpacklo_epi8(u8, u8);
+        __m128i dv = _mm_unpacklo_epi8(v8, v8);
+        unsigned char r[16], g[16], b[16];
+        __m128i r0, g0, b0, r1, g1, b1;
+        unsigned char *out = rgb + (size_t)x * 3;
+        int i;
+
+        yuv8(_mm_unpacklo_epi8(ly, zero),
+             _mm_sub_epi16(_mm_unpacklo_epi8(du, zero), bias),
+             _mm_sub_epi16(_mm_unpacklo_epi8(dv, zero), bias),
+             studio_range, &r0, &g0, &b0);
+        yuv8(_mm_unpackhi_epi8(ly, zero),
+             _mm_sub_epi16(_mm_unpackhi_epi8(du, zero), bias),
+             _mm_sub_epi16(_mm_unpackhi_epi8(dv, zero), bias),
+             studio_range, &r1, &g1, &b1);
+        store16(r, _mm_packus_epi16(r0, r1));
+        store16(g, _mm_packus_epi16(g0, g1));
+        store16(b, _mm_packus_epi16(b0, b1));
+        for (i = 0; i < 16; i++) {
+            out[i * 3 + 0] = r[i];
+            out[i * 3 + 1] = g[i];
+            out[i * 3 + 2] = b[i];
+        }
+    }
+    return x;
 }
 
 /* Eight floats rounded in the current mode (half to even by default, as
