@@ -94,6 +94,16 @@ for byte. See [audio-encoder-design.md](audio-encoder-design.md).
 and plane handling in `bink2_video.c`, and differ in the slice body. Keep
 revision-specific syntax in `bink2_video_old.c` or `bink2_video_new.c`.
 
+### Slices are independent
+
+A frame's slices share no decoding state. Everything a slice predicts from
+(DC values, motion vectors, quantisers, the current macroblock position) lives
+in its own `Bink2Slice` in `Bink2Video.slice[]` and is reset at the slice's
+first row. A slice writes only its own macroblock rows of the current picture
+and the motion arrays, and reads the reference picture, which is complete
+before the frame starts. The encoder, which codes one slice at a time, uses
+`slice[0]`.
+
 ### Untrusted input
 
 Any `.bk2` file may be hostile. Header fields are bounded at open

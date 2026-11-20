@@ -164,24 +164,31 @@ int bink2_video_init(Bink2Video *v, unsigned long width, unsigned long height,
     v->mv[0] = (int16_t *)calloc(v->mv_capacity, sizeof(int16_t));
     v->mv[1] = (int16_t *)calloc(v->mv_capacity, sizeof(int16_t));
     v->mv_count = (unsigned char *)calloc(v->mv_capacity, 1);
-    v->old_dc_cur = (Bink2OldDc *)calloc((size_t)v->mb_w + 1,
-                                         sizeof(Bink2OldDc));
-    v->old_dc_prev = (Bink2OldDc *)calloc((size_t)v->mb_w + 1,
+    for (i = 0; i < BINK2_MAX_SLICES; i++) {
+        Bink2Slice *sl = &v->slice[i];
+
+        sl->dc_cur = (Bink2OldDc *)calloc((size_t)v->mb_w + 1,
                                           sizeof(Bink2OldDc));
-    v->old_mv_cur = (int32_t *)calloc(((size_t)v->mb_w + 1) * 8,
-                                      sizeof(int32_t));
-    v->old_mv_prev = (int32_t *)calloc(((size_t)v->mb_w + 1) * 8,
+        sl->dc_prev = (Bink2OldDc *)calloc((size_t)v->mb_w + 1,
+                                           sizeof(Bink2OldDc));
+        sl->mv_cur = (int32_t *)calloc(((size_t)v->mb_w + 1) * 8,
                                        sizeof(int32_t));
-    v->new_q_cur = (Bink2Quant *)calloc((size_t)v->mb_w + 1,
-                                        sizeof(Bink2Quant));
-    v->new_q_prev = (Bink2Quant *)calloc((size_t)v->mb_w + 1,
+        sl->mv_prev = (int32_t *)calloc(((size_t)v->mb_w + 1) * 8,
+                                        sizeof(int32_t));
+        sl->q_cur = (Bink2Quant *)calloc((size_t)v->mb_w + 1,
                                          sizeof(Bink2Quant));
+        sl->q_prev = (Bink2Quant *)calloc((size_t)v->mb_w + 1,
+                                          sizeof(Bink2Quant));
+        if (sl->dc_cur == NULL || sl->dc_prev == NULL ||
+            sl->mv_cur == NULL || sl->mv_prev == NULL ||
+            sl->q_cur == NULL || sl->q_prev == NULL) {
+            bink2_video_uninit(v);
+            return -1;
+        }
+    }
     v->rgb_size = (size_t)width * height * 3;
     v->rgb = (unsigned char *)calloc(1, v->rgb_size);
     if (v->mv[0] == NULL || v->mv[1] == NULL || v->mv_count == NULL ||
-        v->old_dc_cur == NULL || v->old_dc_prev == NULL ||
-        v->old_mv_cur == NULL || v->old_mv_prev == NULL ||
-        v->new_q_cur == NULL || v->new_q_prev == NULL ||
         v->rgb == NULL) {
         bink2_video_uninit(v);
         return -1;
@@ -202,15 +209,31 @@ void bink2_video_uninit(Bink2Video *v)
     free(v->mv[0]);
     free(v->mv[1]);
     free(v->mv_count);
-    free(v->old_dc_cur);
-    free(v->old_dc_prev);
-    free(v->old_mv_cur);
-    free(v->old_mv_prev);
-    free(v->new_q_cur);
-    free(v->new_q_prev);
+    for (i = 0; i < BINK2_MAX_SLICES; i++) {
+        free(v->slice[i].dc_cur);
+        free(v->slice[i].dc_prev);
+        free(v->slice[i].mv_cur);
+        free(v->slice[i].mv_prev);
+        free(v->slice[i].q_cur);
+        free(v->slice[i].q_prev);
+    }
     free(v->rgb);
     free(v->packet);
     memset(v, 0, sizeof(*v));
+}
+
+void bink2_video_reset_slice(const Bink2Video *v, Bink2Slice *s)
+{
+    size_t n = (size_t)v->mb_w + 1;
+
+    memset(s->dc_cur, 0, n * sizeof(Bink2OldDc));
+    memset(s->dc_prev, 0, n * sizeof(Bink2OldDc));
+    memset(s->mv_cur, 0, n * 8 * sizeof(int32_t));
+    memset(s->mv_prev, 0, n * 8 * sizeof(int32_t));
+    memset(s->q_cur, 0, n * sizeof(Bink2Quant));
+    memset(s->q_prev, 0, n * sizeof(Bink2Quant));
+    s->mb_pos = 0;
+    s->comp = 0;
 }
 
 void bink2_video_reset(Bink2Video *v)
@@ -231,14 +254,8 @@ void bink2_video_reset(Bink2Video *v)
     memset(v->mv[0], 0, v->mv_capacity * sizeof(int16_t));
     memset(v->mv[1], 0, v->mv_capacity * sizeof(int16_t));
     memset(v->mv_count, 0, v->mv_capacity);
-    memset(v->old_dc_cur, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2OldDc));
-    memset(v->old_dc_prev, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2OldDc));
-    memset(v->old_mv_cur, 0, ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
-    memset(v->old_mv_prev, 0, ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
-    memset(v->new_q_cur, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
-    memset(v->new_q_prev, 0, ((size_t)v->mb_w + 1) * sizeof(Bink2Quant));
-    v->old_mb_pos = 0;
-    v->old_comp = 0;
+    for (i = 0; i < BINK2_MAX_SLICES; i++)
+        bink2_video_reset_slice(v, &v->slice[i]);
     v->has_prev = 0;
     v->rgb_valid = 0;
 }
@@ -306,8 +323,6 @@ static int decode_impl(Bink2Video *v, const unsigned char *data,
     memset(v->mv[0], 0, v->mv_capacity * sizeof(int16_t));
     memset(v->mv[1], 0, v->mv_capacity * sizeof(int16_t));
     memset(v->mv_count, 0, v->mv_capacity);
-    memset(v->old_mv_cur, 0,
-           ((size_t)v->mb_w + 1) * 8 * sizeof(int32_t));
 
     bink2_bits_init(&bits, data, padded_size);
     bink2_bits_skip(&bits, 32);
@@ -350,11 +365,13 @@ static int decode_impl(Bink2Video *v, const unsigned char *data,
             bink2_bits_skip(&bits, (int)(target - bits.bitpos));
         }
         if (v->version <= 'f') {
-            if (bink2_video_decode_slice_old(v, &bits, is_keyframe,
+            if (bink2_video_decode_slice_old(v, &v->slice[i], &bits,
+                                             is_keyframe,
                                              y0, y1) != 0)
                 return BINK2_ERROR;
         } else {
-            if (bink2_video_decode_slice_new(v, &bits, is_keyframe,
+            if (bink2_video_decode_slice_new(v, &v->slice[i], &bits,
+                                             is_keyframe,
                                              y0, y1) != 0)
                 return BINK2_ERROR;
         }
