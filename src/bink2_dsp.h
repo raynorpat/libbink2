@@ -37,6 +37,23 @@ void bink2_mc_chroma(unsigned char *dst, int dst_stride,
                      const unsigned char *src, int src_stride,
                      int x, int y, int frame_w, int frame_h,
                      int mvx, int mvy);
+void bink2_mc_luma_c(unsigned char *dst, int dst_stride,
+                     const unsigned char *src, int src_stride,
+                     int x, int y, int frame_w, int frame_h,
+                     int mvx, int mvy);
+void bink2_mc_chroma_c(unsigned char *dst, int dst_stride,
+                       const unsigned char *src, int src_stride,
+                       int x, int y, int frame_w, int frame_h,
+                       int mvx, int mvy);
+/* The filter step alone: src points at the block's top-left sample, with
+ * the taps around it readable (2 before and 3 after for luma, 1 after for
+ * chroma). hmode/vmode are the sub-pel phases. */
+void bink2_mc_luma_block_c(unsigned char *dst, int dst_stride,
+                           const unsigned char *src, int src_stride,
+                           int hmode, int vmode);
+void bink2_mc_chroma_block_c(unsigned char *dst, int dst_stride,
+                             const unsigned char *src, int src_stride,
+                             int hmode, int vmode);
 
 /* One row of YUV 4:2:0 to packed RGB24: y has width samples, u and v have
  * (width + 1) / 2. Full-range BT.601, or studio range when studio_range. */
@@ -59,6 +76,12 @@ void BINK2_SIMD(bink2_put_block)(unsigned char *dst, int stride,
                                  const int32_t block[64]);
 void BINK2_SIMD(bink2_add_block)(unsigned char *dst, int stride,
                                  const int32_t block[64]);
+void BINK2_SIMD(bink2_mc_luma_block)(unsigned char *dst, int dst_stride,
+                                     const unsigned char *src, int src_stride,
+                                     int hmode, int vmode);
+void BINK2_SIMD(bink2_mc_chroma_block)(unsigned char *dst, int dst_stride,
+                                       const unsigned char *src,
+                                       int src_stride, int hmode, int vmode);
 #endif
 
 #endif

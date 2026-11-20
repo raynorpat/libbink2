@@ -180,6 +180,146 @@ void bink2_add_block_sse2(unsigned char *dst, int stride,
     }
 }
 
+/* Eight samples at p, zero-extended to 16-bit lanes. */
+static __m128i load8w(const unsigned char *p)
+{
+    return _mm_unpacklo_epi8(_mm_loadl_epi64((const __m128i *)(const void *)p),
+                             _mm_setzero_si128());
+}
+
+/* Luma 6-tap half-pel filter on eight 16-bit lanes, taps at -2..3:
+ * ((((p0 + p1) * 19) >> 1) - (m1 + p2) * 2 + ((m2 + p3) >> 1) + 8) >> 4.
+ * Every intermediate fits in int16; the caller packs with saturation. */
+static __m128i luma_tap(__m128i m2, __m128i m1, __m128i p0, __m128i p1,
+                        __m128i p2, __m128i p3)
+{
+    __m128i a = _mm_add_epi16(p0, p1);
+    __m128i b = _mm_add_epi16(m1, p2);
+    __m128i c = _mm_add_epi16(m2, p3);
+    __m128i r = _mm_srai_epi16(_mm_mullo_epi16(a, _mm_set1_epi16(19)), 1);
+
+    r = _mm_sub_epi16(r, _mm_slli_epi16(b, 1));
+    r = _mm_add_epi16(r, _mm_srai_epi16(c, 1));
+    r = _mm_add_epi16(r, _mm_set1_epi16(8));
+    return _mm_srai_epi16(r, 4);
+}
+
+/* Horizontal filter of one 16-sample row. Reads s[-2..18] only. */
+static __m128i luma_hrow(const unsigned char *s)
+{
+    __m128i lo = luma_tap(load8w(s - 2), load8w(s - 1), load8w(s),
+                          load8w(s + 1), load8w(s + 2), load8w(s + 3));
+    __m128i hi = luma_tap(load8w(s + 6), load8w(s + 7), load8w(s + 8),
+                          load8w(s + 9), load8w(s + 10), load8w(s + 11));
+
+    return _mm_packus_epi16(lo, hi);
+}
+
+static __m128i load16(const unsigned char *p)
+{
+    return _mm_loadu_si128((const __m128i *)(const void *)p);
+}
+
+static void store16(unsigned char *p, __m128i v)
+{
+    _mm_storeu_si128((__m128i *)(void *)p, v);
+}
+
+static __m128i luma_tap16(const __m128i r[6])
+{
+    const __m128i zero = _mm_setzero_si128();
+    __m128i lo = luma_tap(_mm_unpacklo_epi8(r[0], zero),
+                          _mm_unpacklo_epi8(r[1], zero),
+                          _mm_unpacklo_epi8(r[2], zero),
+                          _mm_unpacklo_epi8(r[3], zero),
+                          _mm_unpacklo_epi8(r[4], zero),
+                          _mm_unpacklo_epi8(r[5], zero));
+    __m128i hi = luma_tap(_mm_unpackhi_epi8(r[0], zero),
+                          _mm_unpackhi_epi8(r[1], zero),
+                          _mm_unpackhi_epi8(r[2], zero),
+                          _mm_unpackhi_epi8(r[3], zero),
+                          _mm_unpackhi_epi8(r[4], zero),
+                          _mm_unpackhi_epi8(r[5], zero));
+
+    return _mm_packus_epi16(lo, hi);
+}
+
+void bink2_mc_luma_block_sse2(unsigned char *dst, int dst_stride,
+                              const unsigned char *src, int ss,
+                              int hmode, int vmode)
+{
+    __m128i rows[21];
+    int i, j;
+
+    if (hmode == 0 && vmode == 0) {
+        for (j = 0; j < 16; j++)
+            store16(dst + (long)j * dst_stride, load16(src + (long)j * ss));
+        return;
+    }
+    if (vmode == 0) {
+        for (j = 0; j < 16; j++)
+            store16(dst + (long)j * dst_stride,
+                    luma_hrow(src + (long)j * ss));
+        return;
+    }
+    /* rows[i] is source row i - 2, filtered horizontally when hmode. */
+    for (i = 0; i < 21; i++) {
+        const unsigned char *row = src + (long)(i - 2) * ss;
+
+        rows[i] = hmode ? luma_hrow(row) : load16(row);
+    }
+    for (j = 0; j < 16; j++)
+        store16(dst + (long)j * dst_stride, luma_tap16(rows + j));
+}
+
+/* Chroma quarter-pel filter on 16-bit lanes: (w0 * a + w1 * b + 4) >> 3
+ * with w1 = 2 * mode and w0 = 8 - w1. Mode 2's (a + b + 1) >> 1 is the
+ * same value. */
+static __m128i chroma_tap(__m128i a, __m128i b, int mode)
+{
+    __m128i x = _mm_mullo_epi16(a, _mm_set1_epi16((short)(8 - 2 * mode)));
+
+    x = _mm_add_epi16(x, _mm_mullo_epi16(b, _mm_set1_epi16((short)(2 * mode))));
+    return _mm_srli_epi16(_mm_add_epi16(x, _mm_set1_epi16(4)), 3);
+}
+
+static void store8w(unsigned char *p, __m128i v)
+{
+    _mm_storel_epi64((__m128i *)(void *)p, _mm_packus_epi16(v, v));
+}
+
+void bink2_mc_chroma_block_sse2(unsigned char *dst, int dst_stride,
+                                const unsigned char *src, int ss,
+                                int hmode, int vmode)
+{
+    __m128i rows[9];
+    int i, j;
+
+    if (hmode == 0 && vmode == 0) {
+        for (j = 0; j < 8; j++)
+            store8w(dst + (long)j * dst_stride, load8w(src + (long)j * ss));
+        return;
+    }
+    if (vmode == 0) {
+        for (j = 0; j < 8; j++) {
+            const unsigned char *row = src + (long)j * ss;
+
+            store8w(dst + (long)j * dst_stride,
+                    chroma_tap(load8w(row), load8w(row + 1), hmode));
+        }
+        return;
+    }
+    for (i = 0; i < 9; i++) {
+        const unsigned char *row = src + (long)i * ss;
+
+        rows[i] = hmode ? chroma_tap(load8w(row), load8w(row + 1), hmode)
+                        : load8w(row);
+    }
+    for (j = 0; j < 8; j++)
+        store8w(dst + (long)j * dst_stride,
+                chroma_tap(rows[j], rows[j + 1], vmode));
+}
+
 #else
 typedef int bink2_dsp_sse2_unused;
 #endif

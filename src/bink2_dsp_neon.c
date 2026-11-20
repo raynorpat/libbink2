@@ -154,6 +154,127 @@ void bink2_add_block_neon(unsigned char *dst, int stride,
     }
 }
 
+/* Luma 6-tap half-pel filter on eight samples, taps at -2..3:
+ * ((((p0 + p1) * 19) >> 1) - (m1 + p2) * 2 + ((m2 + p3) >> 1) + 8) >> 4,
+ * clamped to 0..255. Every intermediate fits in int16. */
+static uint8x8_t luma_tap(uint8x8_t m2, uint8x8_t m1, uint8x8_t p0,
+                          uint8x8_t p1, uint8x8_t p2, uint8x8_t p3)
+{
+    int16x8_t a = vreinterpretq_s16_u16(vaddl_u8(p0, p1));
+    int16x8_t b = vreinterpretq_s16_u16(vaddl_u8(m1, p2));
+    int16x8_t c = vreinterpretq_s16_u16(vaddl_u8(m2, p3));
+    int16x8_t r = vshrq_n_s16(vmulq_n_s16(a, 19), 1);
+
+    r = vsubq_s16(r, vshlq_n_s16(b, 1));
+    r = vaddq_s16(r, vshrq_n_s16(c, 1));
+    r = vaddq_s16(r, vdupq_n_s16(8));
+    return vqmovun_s16(vshrq_n_s16(r, 4));
+}
+
+static uint8x16_t luma_tap16(const uint8x16_t r[6])
+{
+    uint8x8_t lo = luma_tap(vget_low_u8(r[0]), vget_low_u8(r[1]),
+                            vget_low_u8(r[2]), vget_low_u8(r[3]),
+                            vget_low_u8(r[4]), vget_low_u8(r[5]));
+    uint8x8_t hi = luma_tap(vget_high_u8(r[0]), vget_high_u8(r[1]),
+                            vget_high_u8(r[2]), vget_high_u8(r[3]),
+                            vget_high_u8(r[4]), vget_high_u8(r[5]));
+
+    return vcombine_u8(lo, hi);
+}
+
+/* Horizontal filter of one 16-sample row. Reads s[-2..18] only. */
+static uint8x16_t luma_hrow(const unsigned char *s)
+{
+    uint8x16_t lo = vld1q_u8(s - 2);    /* s[-2..13] */
+    uint8x16_t hi = vld1q_u8(s + 3);    /* s[3..18] */
+    uint8x8_t a = luma_tap(vget_low_u8(lo),
+                           vget_low_u8(vextq_u8(lo, lo, 1)),
+                           vget_low_u8(vextq_u8(lo, lo, 2)),
+                           vget_low_u8(vextq_u8(lo, lo, 3)),
+                           vget_low_u8(vextq_u8(lo, lo, 4)),
+                           vget_low_u8(vextq_u8(lo, lo, 5)));
+    uint8x8_t b = luma_tap(vget_low_u8(vextq_u8(hi, hi, 3)),
+                           vget_low_u8(vextq_u8(hi, hi, 4)),
+                           vget_low_u8(vextq_u8(hi, hi, 5)),
+                           vget_low_u8(vextq_u8(hi, hi, 6)),
+                           vget_low_u8(vextq_u8(hi, hi, 7)),
+                           vget_low_u8(vextq_u8(hi, hi, 8)));
+
+    return vcombine_u8(a, b);
+}
+
+void bink2_mc_luma_block_neon(unsigned char *dst, int dst_stride,
+                              const unsigned char *src, int ss,
+                              int hmode, int vmode)
+{
+    uint8x16_t rows[21];
+    int i, j;
+
+    if (hmode == 0 && vmode == 0) {
+        for (j = 0; j < 16; j++)
+            vst1q_u8(dst + (long)j * dst_stride,
+                     vld1q_u8(src + (long)j * ss));
+        return;
+    }
+    if (vmode == 0) {
+        for (j = 0; j < 16; j++)
+            vst1q_u8(dst + (long)j * dst_stride,
+                     luma_hrow(src + (long)j * ss));
+        return;
+    }
+    /* rows[i] is source row i - 2, filtered horizontally when hmode. */
+    for (i = 0; i < 21; i++) {
+        const unsigned char *row = src + (long)(i - 2) * ss;
+
+        rows[i] = hmode ? luma_hrow(row) : vld1q_u8(row);
+    }
+    for (j = 0; j < 16; j++)
+        vst1q_u8(dst + (long)j * dst_stride, luma_tap16(rows + j));
+}
+
+/* Chroma quarter-pel filter: (w0 * a + w1 * b + 4) >> 3 with w1 = 2 * mode
+ * and w0 = 8 - w1. Mode 2's (a + b + 1) >> 1 is the same value. */
+static uint8x8_t chroma_tap(uint8x8_t a, uint8x8_t b, int mode)
+{
+    uint16x8_t x = vmull_u8(a, vdup_n_u8((uint8_t)(8 - 2 * mode)));
+
+    x = vmlal_u8(x, b, vdup_n_u8((uint8_t)(2 * mode)));
+    return vrshrn_n_u16(x, 3);
+}
+
+void bink2_mc_chroma_block_neon(unsigned char *dst, int dst_stride,
+                                const unsigned char *src, int ss,
+                                int hmode, int vmode)
+{
+    uint8x8_t rows[9];
+    int i, j;
+
+    if (hmode == 0 && vmode == 0) {
+        for (j = 0; j < 8; j++)
+            vst1_u8(dst + (long)j * dst_stride, vld1_u8(src + (long)j * ss));
+        return;
+    }
+    if (vmode == 0) {
+        for (j = 0; j < 8; j++) {
+            const unsigned char *row = src + (long)j * ss;
+
+            vst1_u8(dst + (long)j * dst_stride,
+                    chroma_tap(vld1_u8(row), vld1_u8(row + 1), hmode));
+        }
+        return;
+    }
+    for (i = 0; i < 9; i++) {
+        const unsigned char *row = src + (long)i * ss;
+
+        rows[i] = hmode ? chroma_tap(vld1_u8(row), vld1_u8(row + 1), hmode)
+                        : vld1_u8(row);
+    }
+    for (j = 0; j < 8; j++)
+        vst1_u8(dst + (long)j * dst_stride,
+                chroma_tap(rows[j], rows[j + 1], vmode));
+}
+
 #else
 typedef int bink2_dsp_neon_unused;
 #endif
