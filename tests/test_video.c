@@ -1,4 +1,6 @@
+#include "bink2.h"
 #include "bink2_dsp.h"
+#include "bink2_internal.h"
 #include "bink2_video.h"
 #include "test_common.h"
 
@@ -177,6 +179,111 @@ static int test_mc_edge(void)
     return 0;
 }
 
+typedef struct {
+    unsigned char *data;
+    size_t size;
+} Packet;
+
+static uint64_t video_hash(Bink2Video *v)
+{
+    uint64_t h = 0;
+    int p;
+
+    for (p = 0; p < 3; p++)
+        h = h * 31 + fnv1a_rows(bink2_video_plane(v, p),
+                                bink2_video_plane_width(v, p),
+                                bink2_video_plane_height(v, p),
+                                bink2_video_stride(v, p));
+    return h;
+}
+
+/* Collect the fixture's keyframe video packets via the container code. */
+static int load_keyframes(Packet out[2], unsigned long *w, unsigned long *h,
+                          unsigned long *flags, int *version)
+{
+    bink2 b = bink2_open_file(BINK2_FIXTURE_DIR "/synthetic_kb2j.bk2",
+                              BINK2_MODE_DISK);
+    unsigned long i;
+    int n = 0;
+
+    if (b == NULL)
+        return -1;
+    bink2_enable_video(b, 1);
+    bink2_info_video(b, w, h, flags);
+    *version = b->version;
+    for (i = 0; i < b->frame_count && n < 2; i++) {
+        if (!b->frame_keyframes[i])
+            continue;
+        if (bink2_seek_keyframe(b, i) == BINK2_ERROR) {
+            bink2_close(b);
+            return -1;
+        }
+        out[n].size = b->video_size;
+        out[n].data = (unsigned char *)malloc(out[n].size);
+        if (out[n].data == NULL) {
+            bink2_close(b);
+            return -1;
+        }
+        memcpy(out[n].data, b->video_data, out[n].size);
+        n++;
+    }
+    bink2_close(b);
+    return n == 2 ? 0 : -1;
+}
+
+/* One decoder reused across packets of different sizes must decode each
+ * exactly as a fresh decoder does: a stale tail from a larger packet must
+ * not leak into a smaller one. */
+static int test_packet_growth(void)
+{
+    Packet k[2];
+    unsigned long w, h, flags;
+    int version;
+    int order[4];
+    Bink2Video reused;
+    int i;
+
+    CHECK(load_keyframes(k, &w, &h, &flags, &version) == 0);
+    CHECK(k[0].size != k[1].size);
+    /* larger, smaller, larger, smaller */
+    order[0] = k[0].size > k[1].size ? 0 : 1;
+    order[1] = 1 - order[0];
+    order[2] = order[0];
+    order[3] = order[1];
+    CHECK(bink2_video_init(&reused, w, h, flags, version) == 0);
+    for (i = 0; i < 4; i++) {
+        Bink2Video fresh;
+        const Packet *p = &k[order[i]];
+
+        CHECK(bink2_video_init(&fresh, w, h, flags, version) == 0);
+        CHECK(bink2_video_decode(&fresh, p->data, p->size, 1) == 0);
+        CHECK(bink2_video_decode(&reused, p->data, p->size, 1) == 0);
+        CHECK(video_hash(&reused) == video_hash(&fresh));
+        bink2_video_uninit(&fresh);
+    }
+    /* Truncated copies of the smaller packet read the implicit zero tail;
+     * after the larger packet the reused buffer holds its bytes there. */
+    for (i = 1; i <= 8; i++) {
+        Bink2Video fresh;
+        const Packet *big = &k[order[0]];
+        const Packet *small = &k[order[1]];
+        int rf, rr;
+
+        CHECK(bink2_video_init(&fresh, w, h, flags, version) == 0);
+        CHECK(bink2_video_decode(&reused, big->data, big->size, 1) == 0);
+        rf = bink2_video_decode(&fresh, small->data, small->size - i, 1);
+        rr = bink2_video_decode(&reused, small->data, small->size - i, 1);
+        CHECK(rf == rr);
+        if (rf == 0)
+            CHECK(video_hash(&reused) == video_hash(&fresh));
+        bink2_video_uninit(&fresh);
+    }
+    bink2_video_uninit(&reused);
+    free(k[0].data);
+    free(k[1].data);
+    return 0;
+}
+
 int main(void)
 {
     CHECK(test_geometry() == 0);
@@ -184,5 +291,6 @@ int main(void)
     CHECK(test_idct_zero() == 0);
     CHECK(test_mc_identity() == 0);
     CHECK(test_mc_edge() == 0);
+    CHECK(test_packet_growth() == 0);
     return 0;
 }

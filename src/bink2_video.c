@@ -209,6 +209,7 @@ void bink2_video_uninit(Bink2Video *v)
     free(v->new_q_cur);
     free(v->new_q_prev);
     free(v->rgb);
+    free(v->packet);
     memset(v, 0, sizeof(*v));
 }
 
@@ -371,13 +372,19 @@ int bink2_video_decode(Bink2Video *v, const unsigned char *data, size_t size,
 
     if (v == NULL || data == NULL || size < 8)
         return BINK2_ERROR;
-    padded = (unsigned char *)malloc(size + 8);
-    if (padded == NULL)
+    if (size > (size_t)-1 - 8)
         return BINK2_ERROR;
+    if (v->packet_capacity < size + 8) {
+        padded = (unsigned char *)realloc(v->packet, size + 8);
+        if (padded == NULL)
+            return BINK2_ERROR;
+        v->packet = padded;
+        v->packet_capacity = size + 8;
+    }
+    padded = v->packet;
     memcpy(padded, data, size);
     memset(padded + size, 0, 8);
     ret = decode_impl(v, padded, size, size + 8, is_keyframe);
-    free(padded);
     if (ret != 0 && v->has_prev) {
         /* Do not publish a half-decoded frame after an error: restore the
          * previous picture so bink2_get_plane keeps returning it. */

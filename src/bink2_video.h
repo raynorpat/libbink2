@@ -47,6 +47,9 @@ typedef struct Bink2Video {
     unsigned char *mv_count;
     size_t mv_capacity;
 
+    unsigned char *packet;      /* frame packet + 8 zero bytes, reused */
+    size_t packet_capacity;
+
     unsigned char *rgb;
     size_t rgb_size;
     int rgb_valid;
