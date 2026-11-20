@@ -96,7 +96,18 @@ cmake -S . -B build-asan -DCMAKE_BUILD_TYPE=Debug -DBINK2_BUILD_TOOLS=ON \
 cmake --build build-asan
 ctest --test-dir build-asan --output-on-failure
 
-# 3. whitespace
+# 3. thread sanitizer build, required for slice threading changes
+cmake -S . -B build-tsan -DCMAKE_BUILD_TYPE=Debug -DBINK2_BUILD_TOOLS=ON \
+  -DCMAKE_C_FLAGS="-fsanitize=thread"
+cmake --build build-tsan
+ctest --test-dir build-tsan --output-on-failure
+
+# 4. scalar build, required for SIMD changes
+cmake -S . -B build-scalar -DBINK2_BUILD_TOOLS=ON -DBINK2_SIMD=OFF
+cmake --build build-scalar
+ctest --test-dir build-scalar --output-on-failure
+
+# 5. whitespace
 git diff --check
 ```
 
