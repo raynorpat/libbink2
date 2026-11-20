@@ -47,26 +47,6 @@ static int popcount16(unsigned value)
     return count;
 }
 
-static int new_read_vlc(Bink2Bits *bits, const uint16_t *codes,
-                        const uint8_t *lengths, int count)
-{
-    unsigned code = 0;
-    int len, i;
-
-    for (len = 1; len <= 12; len++) {
-        int bit = bink2_bits_read1(bits);
-
-        if (bit < 0)
-            return -1;
-        code |= (unsigned)bit << (len - 1);
-        for (i = 0; i < count; i++) {
-            if (lengths[i] == len && codes[i] == code)
-                return i;
-        }
-    }
-    return -1;
-}
-
 static int new_decode_dq(Bink2Bits *bits)
 {
     return bink2_new_read_quant(bits, 0);
@@ -280,7 +260,7 @@ void bink2_new_read_acs(Bink2Bits *bits, int32_t levels[64],
 
         next--;
         if (next < 1) {
-            int skip = new_read_vlc(bits, skip_codes, skip_bits, 14);
+            int skip = bink2_bits_read_vlc(bits, skip_codes, skip_bits, 14);
 
             if (skip < 0) {
                 mark_failed(bits);
@@ -526,7 +506,8 @@ int bink2_new_read_mv(Bink2Bits *bits, int mv[4][2], int *nb)
     *nb = num;
     for (i = 0; i < 2; i++) {
         for (j = 0; j < num; j++) {
-            int val = new_read_vlc(bits, bink2g_mv_codes, bink2g_mv_bits, 16);
+            int val = bink2_bits_read_vlc(bits, bink2g_mv_codes,
+                                          bink2g_mv_bits, 16);
 
             if (val < 0) {
                 bits->bitpos = (size_t)-1;

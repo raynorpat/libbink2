@@ -80,26 +80,6 @@ static const uint8_t chroma_scan[64] = {
     56, 57, 58, 59, 60, 61, 62, 63
 };
 
-static int read_vlc(Bink2Bits *bits, const uint16_t *codes,
-                    const uint8_t *lengths, int count)
-{
-    unsigned code = 0;
-    int len, i;
-
-    for (len = 1; len <= 12; len++) {
-        int bit = bink2_bits_read1(bits);
-
-        if (bit < 0)
-            return -1;
-        code |= (unsigned)bit << (len - 1);
-        for (i = 0; i < count; i++) {
-            if (lengths[i] == len && codes[i] == code)
-                return i;
-        }
-    }
-    return -1;
-}
-
 static int popcount4(unsigned value)
 {
     value &= 0xF;
@@ -109,7 +89,7 @@ static int popcount4(unsigned value)
 
 static int old_delta_q(Bink2Bits *bits)
 {
-    int dq = read_vlc(bits, old_quant_codes, old_quant_bits, 16);
+    int dq = bink2_bits_read_vlc(bits, old_quant_codes, old_quant_bits, 16);
 
     if (dq) {
         int sign = bink2_bits_read1(bits);
@@ -496,7 +476,7 @@ static int old_decode_ac(Bink2Bits *bits, const uint8_t *scan,
         }
 
         while (idx < 64) {
-            int val = read_vlc(bits, val_codes, val_bits, 13);
+            int val = bink2_bits_read_vlc(bits, val_codes, val_bits, 13);
 
             if (val < 0)
                 return -1;
@@ -525,7 +505,7 @@ static int old_decode_ac(Bink2Bits *bits, const uint8_t *scan,
             idx++;
             next--;
             if (next < 1) {
-                int skip = read_vlc(bits, skip_codes, skip_bits,
+                int skip = bink2_bits_read_vlc(bits, skip_codes, skip_bits,
                                     NUM_AC_SKIPS);
 
                 if (skip < 0)
