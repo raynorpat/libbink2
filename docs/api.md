@@ -148,7 +148,9 @@ Things to know:
 ### Frame data
 
 Returned pointers belong to the decoder and are valid until the next frame
-call or `bink2_close()`.
+call or `bink2_close()`. Fetch them again after every frame: the Y, U and V
+planes alternate between two buffers, so a pointer kept from an earlier frame
+points at an older picture.
 
 | Function | Returns |
 | --- | --- |

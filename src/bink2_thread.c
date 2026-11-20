@@ -10,6 +10,12 @@
 #include <stdlib.h>
 
 #if defined(_WIN32)
+/* Condition variables need Windows Vista; older MinGW headers default to
+ * XP and would hide them. */
+#if !defined(_WIN32_WINNT) || _WIN32_WINNT < 0x0600
+#undef _WIN32_WINNT
+#define _WIN32_WINNT 0x0600
+#endif
 #include <windows.h>
 typedef CRITICAL_SECTION Bink2Mutex;
 typedef CONDITION_VARIABLE Bink2Cond;
@@ -212,9 +218,15 @@ int bink2_cpu_count(void)
     GetSystemInfo(&info);
     return info.dwNumberOfProcessors > 0 ? (int)info.dwNumberOfProcessors : 1;
 #else
+#if defined(_SC_NPROCESSORS_ONLN)
     long n = sysconf(_SC_NPROCESSORS_ONLN);
 
     return n > 0 ? (n > 1024 ? 1024 : (int)n) : 1;
+#else
+    /* Hidden by _POSIX_C_SOURCE on some BSDs; decode serially there
+     * unless BINK2_THREADS asks for more. */
+    return 1;
+#endif
 #endif
 }
 

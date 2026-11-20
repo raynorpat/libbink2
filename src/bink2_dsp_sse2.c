@@ -195,13 +195,14 @@ static __m128i load8w(const unsigned char *p)
 
 /* Luma 6-tap half-pel filter on eight 16-bit lanes, taps at -2..3:
  * ((((p0 + p1) * 19) >> 1) - (m1 + p2) * 2 + ((m2 + p3) >> 1) + 8) >> 4.
- * Every intermediate fits in int16; the caller packs with saturation. */
-static __m128i luma_tap(__m128i m2, __m128i m1, __m128i p0, __m128i p1,
-                        __m128i p2, __m128i p3)
+ * Every intermediate fits in int16; the caller packs with saturation.
+ * The taps come as an array: 32-bit MSVC cannot pass more than three
+ * vectors by value. */
+static __m128i luma_tap(const __m128i t[6])
 {
-    __m128i a = _mm_add_epi16(p0, p1);
-    __m128i b = _mm_add_epi16(m1, p2);
-    __m128i c = _mm_add_epi16(m2, p3);
+    __m128i a = _mm_add_epi16(t[2], t[3]);
+    __m128i b = _mm_add_epi16(t[1], t[4]);
+    __m128i c = _mm_add_epi16(t[0], t[5]);
     __m128i r = _mm_srai_epi16(_mm_mullo_epi16(a, _mm_set1_epi16(19)), 1);
 
     r = _mm_sub_epi16(r, _mm_slli_epi16(b, 1));
@@ -213,12 +214,14 @@ static __m128i luma_tap(__m128i m2, __m128i m1, __m128i p0, __m128i p1,
 /* Horizontal filter of one 16-sample row. Reads s[-2..18] only. */
 static __m128i luma_hrow(const unsigned char *s)
 {
-    __m128i lo = luma_tap(load8w(s - 2), load8w(s - 1), load8w(s),
-                          load8w(s + 1), load8w(s + 2), load8w(s + 3));
-    __m128i hi = luma_tap(load8w(s + 6), load8w(s + 7), load8w(s + 8),
-                          load8w(s + 9), load8w(s + 10), load8w(s + 11));
+    __m128i lo[6], hi[6];
+    int k;
 
-    return _mm_packus_epi16(lo, hi);
+    for (k = 0; k < 6; k++) {
+        lo[k] = load8w(s - 2 + k);
+        hi[k] = load8w(s + 6 + k);
+    }
+    return _mm_packus_epi16(luma_tap(lo), luma_tap(hi));
 }
 
 static __m128i load16(const unsigned char *p)
@@ -234,20 +237,14 @@ static void store16(unsigned char *p, __m128i v)
 static __m128i luma_tap16(const __m128i r[6])
 {
     const __m128i zero = _mm_setzero_si128();
-    __m128i lo = luma_tap(_mm_unpacklo_epi8(r[0], zero),
-                          _mm_unpacklo_epi8(r[1], zero),
-                          _mm_unpacklo_epi8(r[2], zero),
-                          _mm_unpacklo_epi8(r[3], zero),
-                          _mm_unpacklo_epi8(r[4], zero),
-                          _mm_unpacklo_epi8(r[5], zero));
-    __m128i hi = luma_tap(_mm_unpackhi_epi8(r[0], zero),
-                          _mm_unpackhi_epi8(r[1], zero),
-                          _mm_unpackhi_epi8(r[2], zero),
-                          _mm_unpackhi_epi8(r[3], zero),
-                          _mm_unpackhi_epi8(r[4], zero),
-                          _mm_unpackhi_epi8(r[5], zero));
+    __m128i lo[6], hi[6];
+    int k;
 
-    return _mm_packus_epi16(lo, hi);
+    for (k = 0; k < 6; k++) {
+        lo[k] = _mm_unpacklo_epi8(r[k], zero);
+        hi[k] = _mm_unpackhi_epi8(r[k], zero);
+    }
+    return _mm_packus_epi16(luma_tap(lo), luma_tap(hi));
 }
 
 void bink2_mc_luma_block_sse2(unsigned char *dst, int dst_stride,

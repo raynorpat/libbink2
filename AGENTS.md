@@ -5,8 +5,8 @@ should start with [CONTRIBUTING.md](CONTRIBUTING.md); the commands and rules
 are the same.
 
 libbink2 is a C99 library that decodes Bink 2 video (`.bk2`, `KB2f`..`KB2n`)
-and encodes `KB2j`. It has no dependencies beyond libc and libm. SDL is
-optional and used only by the player.
+and encodes `KB2j`. It has no dependencies beyond libc, libm, and the platform
+thread library. SDL is optional and used only by the player.
 
 ## Commands
 

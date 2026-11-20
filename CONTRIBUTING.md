@@ -66,7 +66,8 @@ project has no private security channel.
   braces on their own line.
 - `bink2_*` and `bink2_enc_*` for public symbols, `Bink2CamelCase` for
   internal types, `static` for file-local functions.
-- No new dependencies in the libraries. The decoder uses libc and libm only.
+- No new dependencies in the libraries. The decoder uses libc, libm, and the
+  platform thread library (POSIX or Win32 threads) only.
 
 ### Rules that are easy to break
 
