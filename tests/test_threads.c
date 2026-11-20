@@ -2,6 +2,7 @@
 #include "bink2_encoder.h"
 #include "bink2_internal.h"
 #include "bink2_thread.h"
+#include "bink2_video.h"
 #include "test_common.h"
 
 #include <stdio.h>
@@ -186,16 +187,34 @@ static int test_seek_after_threaded(void)
     return 0;
 }
 
+static int has_pool(bink2 b)
+{
+    return b->video != NULL && b->video->pool != NULL;
+}
+
+/* Threads start on the first multi-slice frame, not at open, and never in
+ * serial mode. */
 static int test_open_close_no_decode(void)
 {
+    bink2 b;
     int i;
 
     for (i = 0; i < 100; i++) {
-        bink2 b = open_with("test_threads_s8.bk2", 8);
-
+        b = open_with("test_threads_s8.bk2", 8);
         CHECK(b != NULL);
+        CHECK(!has_pool(b));
         bink2_close(b);
     }
+    b = open_with("test_threads_s8.bk2", 1);
+    CHECK(b != NULL);
+    CHECK(bink2_first(b) != BINK2_ERROR);
+    CHECK(!has_pool(b));
+    bink2_close(b);
+    b = open_with("test_threads_s8.bk2", 8);
+    CHECK(b != NULL);
+    CHECK(bink2_first(b) != BINK2_ERROR);
+    CHECK(has_pool(b));
+    bink2_close(b);
     return 0;
 }
 

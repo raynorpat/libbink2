@@ -520,6 +520,75 @@ static int test_threaded_fuzz(void)
     return 0;
 }
 
+/* Hashes of frames 0..n-1 decoded with bink2_next, BINK2_ERROR frames
+ * included (the picture left visible after the failure). */
+static int decode_run(const unsigned char *buf, size_t size, int threads,
+                      int n, int status[], uint64_t hash[])
+{
+    bink2 b = bink2_open_memory(buf, (unsigned long)size);
+    int i;
+
+    if (b == NULL)
+        return -1;
+    bink2_enable_video(b, 1);
+    bink2_internal_set_threads(b, threads);
+    for (i = 0; i < n; i++) {
+        status[i] = i == 0 ? bink2_first(b) : bink2_next(b);
+        hash[i] = picture_hash(b);
+    }
+    bink2_close(b);
+    return 0;
+}
+
+/* Damage inside a slice of inter frame 1 (not its offsets) fails that
+ * frame; frame 0 stays visible, decoding carries on with plain next calls,
+ * and from the next keyframe on the pictures are the undamaged ones. */
+static int test_mid_slice_recover(void)
+{
+    unsigned char *orig, *buf;
+    size_t size;
+    unsigned long frame1, frame2, key2 = 0, pos;
+    int good_status[32], status[2][32];
+    uint64_t good[32], hash[2][32];
+    int i, t, found = 0;
+
+    orig = load_fixture(&size);
+    CHECK(orig != NULL);
+    buf = (unsigned char *)malloc(size);
+    CHECK(buf != NULL);
+    for (i = 2; i < 32 && key2 == 0; i++)
+        if (le32(orig + 48 + 4 * i) & 1)
+            key2 = (unsigned long)i;
+    CHECK(key2 > 2 && key2 + 2 < 32);
+    CHECK(decode_run(orig, size, 1, 32, good_status, good) == 0);
+    frame1 = le32(orig + 52) & ~1UL;
+    frame2 = le32(orig + 56) & ~1UL;
+    /* The first byte past frame 1's offset table whose damage fails it. */
+    for (pos = frame1 + 16; pos < frame2 && !found; pos++) {
+        memcpy(buf, orig, size);
+        buf[pos] ^= 0xFF;
+        CHECK(decode_run(buf, size, 1, 2, status[0], hash[0]) == 0);
+        found = status[0][1] == BINK2_ERROR;
+    }
+    CHECK(found);
+    for (t = 0; t < 2; t++) {
+        CHECK(decode_run(buf, size, t == 0 ? 1 : 8, (int)key2 + 2,
+                         status[t], hash[t]) == 0);
+        CHECK(status[t][1] == BINK2_ERROR);
+        CHECK(hash[t][1] == good[0]);
+        CHECK(status[t][key2] != BINK2_ERROR);
+        CHECK(hash[t][key2] == good[key2]);
+        CHECK(hash[t][key2 + 1] == good[key2 + 1]);
+    }
+    for (i = 0; i < (int)key2 + 2; i++) {
+        CHECK(status[0][i] == status[1][i]);
+        CHECK(hash[0][i] == hash[1][i]);
+    }
+    free(buf);
+    free(orig);
+    return 0;
+}
+
 int main(void)
 {
     CHECK(test_header_rejects() == 0);
@@ -531,6 +600,7 @@ int main(void)
     CHECK(test_slice_overlap() == 0);
     CHECK(test_slice_offset_backwards() == 0);
     CHECK(test_threaded_fuzz() == 0);
+    CHECK(test_mid_slice_recover() == 0);
     CHECK(test_seek_clamp() == 0);
     CHECK(test_audio_overrun() == 0);
     CHECK(test_audio_truncated_prefix() == 0);
