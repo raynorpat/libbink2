@@ -145,11 +145,46 @@ static int test_mc_chroma(void)
     return mc_case(1);
 }
 
+/* Random values, every k + 0.5 tie in -300..300 (round half to even), and
+ * signed zeros, in both the put and the add form. */
+static int test_block_f(void)
+{
+    enum { STRIDE = 40 };
+    float ties[602 + 2];
+    int n, i, nties = 0;
+
+    for (i = -300; i <= 300; i++)
+        ties[nties++] = (float)i + 0.5f;
+    ties[nties++] = 0.0f;
+    ties[nties++] = -0.0f;
+    for (n = 0; n < 20000; n++) {
+        unsigned char da[STRIDE * 8], db[STRIDE * 8];
+        float block[64];
+
+        for (i = 0; i < 64; i++) {
+            if (n & 1)
+                block[i] = ties[next_rand() % (uint32_t)nties];
+            else
+                block[i] = (float)rand_range(-600000, 600000) / 1000.0f;
+        }
+        for (i = 0; i < STRIDE * 8; i++)
+            da[i] = db[i] = (unsigned char)next_rand();
+        bink2_put_block_f(da + 3, STRIDE, block);
+        bink2_put_block_f_c(db + 3, STRIDE, block);
+        CHECK(memcmp(da, db, sizeof(da)) == 0);
+        bink2_add_block_f(da + 5, STRIDE, block);
+        bink2_add_block_f_c(db + 5, STRIDE, block);
+        CHECK(memcmp(da, db, sizeof(da)) == 0);
+    }
+    return 0;
+}
+
 int main(void)
 {
     CHECK(test_idct_new() == 0);
     CHECK(test_put_add_block() == 0);
     CHECK(test_mc_luma() == 0);
     CHECK(test_mc_chroma() == 0);
+    CHECK(test_block_f() == 0);
     return 0;
 }

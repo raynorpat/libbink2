@@ -58,7 +58,8 @@ void bink2_idct_old(float *block)
     }
 }
 
-void bink2_put_block_f(unsigned char *dst, int stride, const float block[64])
+void bink2_put_block_f_c(unsigned char *dst, int stride,
+                         const float block[64])
 {
     int i, j;
 
@@ -70,7 +71,8 @@ void bink2_put_block_f(unsigned char *dst, int stride, const float block[64])
     }
 }
 
-void bink2_add_block_f(unsigned char *dst, int stride, const float block[64])
+void bink2_add_block_f_c(unsigned char *dst, int stride,
+                         const float block[64])
 {
     int i, j;
 
@@ -81,6 +83,28 @@ void bink2_add_block_f(unsigned char *dst, int stride, const float block[64])
         dst += stride;
         block += 8;
     }
+}
+
+/* The SIMD conversions round half to even, as lrintf does in the default
+ * rounding mode, and saturate where lrintf's result would not fit an int.
+ * KB2f block values are far inside that range: AC levels are at most about
+ * 2^10, scaled by at most 128 and a matrix entry near 1. */
+void bink2_put_block_f(unsigned char *dst, int stride, const float block[64])
+{
+#if defined(BINK2_SIMD_FLOAT_BLOCK)
+    BINK2_SIMD(bink2_put_block_f)(dst, stride, block);
+#else
+    bink2_put_block_f_c(dst, stride, block);
+#endif
+}
+
+void bink2_add_block_f(unsigned char *dst, int stride, const float block[64])
+{
+#if defined(BINK2_SIMD_FLOAT_BLOCK)
+    BINK2_SIMD(bink2_add_block_f)(dst, stride, block);
+#else
+    bink2_add_block_f_c(dst, stride, block);
+#endif
 }
 
 #define IDCT_MUL_A(val) ((val) + ((val) >> 2))

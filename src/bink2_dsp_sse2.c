@@ -320,6 +320,43 @@ void bink2_mc_chroma_block_sse2(unsigned char *dst, int dst_stride,
                 chroma_tap(rows[j], rows[j + 1], vmode));
 }
 
+/* Eight floats rounded in the current mode (half to even by default, as
+ * lrintf) and saturated to int16. */
+static __m128i round8(const float *p)
+{
+    return _mm_packs_epi32(_mm_cvtps_epi32(_mm_loadu_ps(p)),
+                           _mm_cvtps_epi32(_mm_loadu_ps(p + 4)));
+}
+
+void bink2_put_block_f_sse2(unsigned char *dst, int stride,
+                            const float block[64])
+{
+    int i;
+
+    for (i = 0; i < 8; i++) {
+        __m128i r = round8(block + 8 * i);
+
+        _mm_storel_epi64((__m128i *)(void *)(dst + (long)i * stride),
+                         _mm_packus_epi16(r, r));
+    }
+}
+
+void bink2_add_block_f_sse2(unsigned char *dst, int stride,
+                            const float block[64])
+{
+    const __m128i zero = _mm_setzero_si128();
+    int i;
+
+    for (i = 0; i < 8; i++) {
+        unsigned char *d = dst + (long)i * stride;
+        __m128i px = _mm_unpacklo_epi8(
+            _mm_loadl_epi64((const __m128i *)(const void *)d), zero);
+
+        px = _mm_adds_epi16(px, round8(block + 8 * i));
+        _mm_storel_epi64((__m128i *)(void *)d, _mm_packus_epi16(px, px));
+    }
+}
+
 #else
 typedef int bink2_dsp_sse2_unused;
 #endif

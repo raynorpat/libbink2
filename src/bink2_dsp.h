@@ -19,6 +19,10 @@
 void bink2_idct_old(float block[64]);
 void bink2_put_block_f(unsigned char *dst, int stride, const float block[64]);
 void bink2_add_block_f(unsigned char *dst, int stride, const float block[64]);
+void bink2_put_block_f_c(unsigned char *dst, int stride,
+                         const float block[64]);
+void bink2_add_block_f_c(unsigned char *dst, int stride,
+                         const float block[64]);
 
 void bink2_idct_new(int32_t block[64]);
 void bink2_put_block(unsigned char *dst, int stride, const int32_t block[64]);
@@ -70,6 +74,12 @@ void bink2_yuv_row(unsigned char *rgb, const unsigned char *y,
 #define BINK2_SIMD(name) name##_sse2
 #endif
 
+/* Round-to-nearest-even float conversion needs AArch64 NEON (vcvtnq). */
+#if (defined(BINK2_SIMD_NEON) && defined(__aarch64__)) || \
+    defined(BINK2_SIMD_SSE2)
+#define BINK2_SIMD_FLOAT_BLOCK 1
+#endif
+
 #if defined(BINK2_SIMD)
 void BINK2_SIMD(bink2_idct_new)(int32_t block[64]);
 void BINK2_SIMD(bink2_put_block)(unsigned char *dst, int stride,
@@ -82,6 +92,12 @@ void BINK2_SIMD(bink2_mc_luma_block)(unsigned char *dst, int dst_stride,
 void BINK2_SIMD(bink2_mc_chroma_block)(unsigned char *dst, int dst_stride,
                                        const unsigned char *src,
                                        int src_stride, int hmode, int vmode);
+#endif
+#if defined(BINK2_SIMD_FLOAT_BLOCK)
+void BINK2_SIMD(bink2_put_block_f)(unsigned char *dst, int stride,
+                                   const float block[64]);
+void BINK2_SIMD(bink2_add_block_f)(unsigned char *dst, int stride,
+                                   const float block[64]);
 #endif
 
 #endif

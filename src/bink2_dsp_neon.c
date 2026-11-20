@@ -275,6 +275,38 @@ void bink2_mc_chroma_block_neon(unsigned char *dst, int dst_stride,
                 chroma_tap(rows[j], rows[j + 1], vmode));
 }
 
+#if defined(BINK2_SIMD_FLOAT_BLOCK)
+/* Eight floats rounded half to even (lrintf in the default mode) and
+ * saturated to int16. */
+static int16x8_t round8(const float *p)
+{
+    return vcombine_s16(vqmovn_s32(vcvtnq_s32_f32(vld1q_f32(p))),
+                        vqmovn_s32(vcvtnq_s32_f32(vld1q_f32(p + 4))));
+}
+
+void bink2_put_block_f_neon(unsigned char *dst, int stride,
+                            const float block[64])
+{
+    int i;
+
+    for (i = 0; i < 8; i++)
+        vst1_u8(dst + (long)i * stride, vqmovun_s16(round8(block + 8 * i)));
+}
+
+void bink2_add_block_f_neon(unsigned char *dst, int stride,
+                            const float block[64])
+{
+    int i;
+
+    for (i = 0; i < 8; i++) {
+        unsigned char *d = dst + (long)i * stride;
+        int16x8_t px = vreinterpretq_s16_u16(vmovl_u8(vld1_u8(d)));
+
+        vst1_u8(d, vqmovun_s16(vqaddq_s16(px, round8(block + 8 * i))));
+    }
+}
+#endif
+
 #else
 typedef int bink2_dsp_neon_unused;
 #endif

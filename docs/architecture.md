@@ -125,7 +125,9 @@ routine calls the matching version. There is no runtime CPU detection: both
 are baseline for their architecture. Every SIMD routine must equal its scalar
 `*_c` reference bit for bit, including saturation and truncation;
 `test_dsp_simd` compares them on random and edge-case inputs. The `KB2f` float
-IDCT stays scalar because reordering float operations changes its output.
+IDCT stays scalar because reordering float operations changes its output; its
+float-to-pixel block writes are vectorised on SSE2 and AArch64, where the
+conversion rounds half to even like `lrintf`.
 
 ### Untrusted input
 
