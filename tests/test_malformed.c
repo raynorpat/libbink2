@@ -334,12 +334,76 @@ static int test_fuzz(void)
     return 0;
 }
 
+static uint64_t picture_hash(bink2 b)
+{
+    unsigned long w = 0, h = 0, flags = 0;
+    uint64_t hash = 0;
+    int p;
+
+    bink2_info_video(b, &w, &h, &flags);
+    for (p = 0; p < 3; p++) {
+        int pw = p == 0 ? (int)w : (int)((w + 1) / 2);
+        int ph = p == 0 ? (int)h : (int)((h + 1) / 2);
+
+        hash = hash * 31 + fnv1a_rows(bink2_get_plane(b, p), pw, ph,
+                                      bink2_get_stride(b, p));
+    }
+    return hash;
+}
+
+/* A failed inter frame leaves the previous picture visible, and decoding
+ * resumes correctly from a keyframe and from a rewind afterwards. */
+static int test_error_then_recover(void)
+{
+    unsigned char *buf;
+    size_t size;
+    unsigned long frame1, key2 = 0, i;
+    uint64_t good[32];
+    bink2 b;
+
+    buf = load_fixture(&size);
+    CHECK(buf != NULL);
+    b = bink2_open_memory(buf, (unsigned long)size);
+    CHECK(b != NULL);
+    bink2_enable_video(b, 1);
+    CHECK(bink2_first(b) != BINK2_ERROR);
+    good[0] = picture_hash(b);
+    for (i = 1; i < 32; i++) {
+        CHECK(bink2_next(b) != BINK2_ERROR);
+        good[i] = picture_hash(b);
+        if (key2 == 0 && (le32(buf + 48 + 4 * i) & 1))
+            key2 = i;
+    }
+    bink2_close(b);
+    CHECK(key2 > 1);
+
+    frame1 = le32(buf + 52) & ~1UL;
+    w32(buf + frame1 + 4, 0x40000000UL);
+    b = bink2_open_memory(buf, (unsigned long)size);
+    CHECK(b != NULL);
+    bink2_enable_video(b, 1);
+    CHECK(bink2_first(b) != BINK2_ERROR);
+    CHECK(picture_hash(b) == good[0]);
+    CHECK(bink2_next(b) == BINK2_ERROR);
+    CHECK(picture_hash(b) == good[0]);
+    CHECK(bink2_seek_keyframe(b, key2) != BINK2_ERROR);
+    CHECK(picture_hash(b) == good[key2]);
+    CHECK(bink2_next(b) != BINK2_ERROR);
+    CHECK(picture_hash(b) == good[key2 + 1]);
+    CHECK(bink2_first(b) != BINK2_ERROR);
+    CHECK(picture_hash(b) == good[0]);
+    bink2_close(b);
+    free(buf);
+    return 0;
+}
+
 int main(void)
 {
     CHECK(test_header_rejects() == 0);
     CHECK(test_slice_memory() == 0);
     CHECK(test_truncated_video() == 0);
     CHECK(test_slice_offset() == 0);
+    CHECK(test_error_then_recover() == 0);
     CHECK(test_seek_clamp() == 0);
     CHECK(test_audio_overrun() == 0);
     CHECK(test_audio_truncated_prefix() == 0);

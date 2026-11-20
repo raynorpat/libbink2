@@ -288,6 +288,18 @@ static int decode_impl(Bink2Video *v, const unsigned char *data,
     int slice_height[8] = { 0, 0, 0, 0, 0, 0, 0, 0 };
     int i;
 
+    /* The last picture becomes the reference by swapping pointers: every
+     * Y/U/V macroblock of cur is rewritten each frame, and cur is only read
+     * where this frame already wrote it. Alpha stays copied (see the end of
+     * this function): KB2f motion macroblocks keep or add to the previous
+     * alpha in place. */
+    for (i = 0; i < 3; i++) {
+        unsigned char *t = v->ref[i];
+
+        v->ref[i] = v->cur[i];
+        v->cur[i] = t;
+    }
+
     frame_flags = le32(data);
     v->frame_flags = frame_flags;
     v->rgb_valid = 0;
@@ -353,13 +365,8 @@ static int decode_impl(Bink2Video *v, const unsigned char *data,
     if (bits.bitpos > real_size * 8UL + 64UL)
         return BINK2_ERROR;
 
-    for (i = 0; i < 4; i++) {
-        unsigned long h = (i == 1 || i == 2) ? v->aligned_h / 2
-                                             : v->aligned_h;
-
-        if (v->cur[i] != NULL && v->ref[i] != NULL)
-            memcpy(v->ref[i], v->cur[i], (size_t)v->stride[i] * h);
-    }
+    if (v->cur[3] != NULL && v->ref[3] != NULL)
+        memcpy(v->ref[3], v->cur[3], (size_t)v->stride[3] * v->aligned_h);
     v->has_prev = 1;
     return 0;
 }
