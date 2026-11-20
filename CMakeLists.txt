@@ -29,7 +29,10 @@ function(bink2_set_compile_settings target)
   if(MSVC)
     target_compile_options(${target} PRIVATE /W3 /fp:precise)
   else()
-    target_compile_options(${target} PRIVATE -Wall -Wextra -fno-math-errno -fno-signed-zeros)
+    # No implicit fused multiply-add: KB2f's float IDCT must round the same
+    # way on every target, and fuses exactly where the oracle did (fmaf).
+    target_compile_options(${target} PRIVATE -Wall -Wextra -fno-math-errno -fno-signed-zeros
+      -ffp-contract=off)
   endif()
 endfunction()
 

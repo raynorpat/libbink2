@@ -75,7 +75,13 @@ unmerged FFmpeg Bink 2 patches at one pinned commit, and the golden checksums
 in `tests/reference_checksums.h` are generated from that same build. "Correct"
 means bit-identical video to the pinned oracle, not to RAD's decoder. The one
 known gap between the two is the in-loop deblocking filter, which neither the
-oracle nor libbink2 implements. See [bink2.md](bink2.md) and
+oracle nor libbink2 implements.
+
+The `KB2f` float IDCT depends on how multiply-adds are rounded. The oracle's
+build fused three of them, so `idct_1d_old` writes those three with `fmaf()`
+and the libraries build with `-ffp-contract=off` (MSVC's `/fp:precise` does
+not contract either). `KB2f` output is then identical on every platform and
+compiler instead of depending on whether the compiler happens to fuse. See [bink2.md](bink2.md) and
 [tests/README.md](../tests/README.md).
 
 ### The encoder reconstructs with decoder code

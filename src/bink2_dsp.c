@@ -12,10 +12,14 @@ static int clip8(int v)
     return v;
 }
 
+/* The three fused multiply-adds are explicit: the pinned oracle's build
+ * fused these expressions (and only these), so the golden checksums need
+ * a single rounding here and two everywhere else. The library builds with
+ * -ffp-contract=off so no compiler adds or removes a fusion. */
 static void idct_1d_old(float *blk, int step)
 {
     float t00 =  blk[2 * step] + blk[6 * step];
-    float t01 = (blk[2 * step] - blk[6 * step]) * 1.4142135f - t00;
+    float t01 = fmaf(blk[2 * step] - blk[6 * step], 1.4142135f, -t00);
     float t02 =  blk[0 * step] + blk[4 * step];
     float t03 =  blk[0 * step] - blk[4 * step];
     float t04 =  blk[3 * step] + blk[5 * step];
@@ -29,9 +33,9 @@ static void idct_1d_old(float *blk, int step)
     float t12 = t06 + t04;
     float t13 = (t06 - t04) * 1.4142135f;
     float t14 = (t07 - t05) * 1.847759f;
-    float t15 = t05 * 2.613126f + t14 - t12;
+    float t15 = fmaf(t05, 2.613126f, t14) - t12;
     float t16 = t13 - t15;
-    float t17 = t07 * 1.0823922f - t14 + t16;
+    float t17 = fmaf(t07, 1.0823922f, -t14) + t16;
 
     blk[0 * step] = t08 + t12;
     blk[1 * step] = t10 + t15;
