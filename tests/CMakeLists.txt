@@ -14,6 +14,10 @@ add_executable(test_frames test_frames.c)
 target_link_libraries(test_frames PRIVATE ${BINK2_LINK_TARGET})
 add_test(NAME frames COMMAND test_frames)
 
+add_executable(test_thread test_thread.c)
+target_link_libraries(test_thread PRIVATE ${BINK2_LINK_TARGET})
+add_test(NAME thread COMMAND test_thread)
+
 add_executable(test_video test_video.c)
 target_link_libraries(test_video PRIVATE ${BINK2_LINK_TARGET})
 target_compile_definitions(test_video PRIVATE

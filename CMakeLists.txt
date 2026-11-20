@@ -36,7 +36,9 @@ endfunction()
 set(BINK2_DECODER_SOURCES
   src/bink2.c src/bink2_bits.c src/bink2_dsp.c src/bink2_tables.c
   src/bink2_video.c src/bink2_video_old.c src/bink2_video_new.c
-  src/bink2_audio.c)
+  src/bink2_audio.c src/bink2_thread.c)
+
+find_package(Threads REQUIRED)
 
 if(BINK2_BUILD_STATIC)
   add_library(bink2_static STATIC ${BINK2_DECODER_SOURCES})
@@ -45,6 +47,7 @@ if(BINK2_BUILD_STATIC)
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/src>
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>)
   set_target_properties(bink2_static PROPERTIES OUTPUT_NAME bink2)
+  target_link_libraries(bink2_static PUBLIC Threads::Threads)
   if(NOT MSVC)
     target_link_libraries(bink2_static PUBLIC m)
   endif()
@@ -61,6 +64,7 @@ if(BINK2_BUILD_SHARED)
     VERSION ${PROJECT_VERSION}
     SOVERSION 0
     WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  target_link_libraries(bink2_shared PRIVATE Threads::Threads)
   if(NOT MSVC)
     target_link_libraries(bink2_shared PUBLIC m)
   endif()
