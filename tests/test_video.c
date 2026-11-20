@@ -77,6 +77,51 @@ static int test_rgb(void)
     return 0;
 }
 
+/* The frame converter is the row converter applied to every row. */
+static int test_yuv_row_matches_frame(void)
+{
+    Bink2Video v;
+    const unsigned long w = 333, h = 251;
+    unsigned char *row = (unsigned char *)malloc(w * 3);
+    int range, p;
+    unsigned long x, y;
+
+    CHECK(row != NULL);
+    CHECK(bink2_video_init(&v, w, h, 0, 'j') == 0);
+    for (p = 0; p < 3; p++) {
+        unsigned char *plane = v.cur[p];
+        int ph = p == 0 ? (int)v.aligned_h : (int)v.aligned_h / 2;
+
+        for (y = 0; y < (unsigned long)ph; y++)
+            for (x = 0; x < (unsigned long)v.stride[p]; x++)
+                plane[y * v.stride[p] + x] =
+                    (unsigned char)((x * 7 + y * 13 + p * 50) & 0xFF);
+    }
+    for (range = 0; range < 2; range++) {
+        const unsigned char *rgb;
+
+        v.range = range == 0 ? BINK2_RANGE_FULL : BINK2_RANGE_STUDIO;
+        v.rgb_valid = 0;
+        rgb = bink2_video_rgb(&v);
+        CHECK(rgb != NULL);
+        for (y = 0; y < h; y++) {
+            bink2_yuv_row(row, v.cur[0] + y * v.stride[0],
+                          v.cur[1] + (y / 2) * v.stride[1],
+                          v.cur[2] + (y / 2) * v.stride[2], (int)w,
+                          v.range == BINK2_RANGE_STUDIO);
+            CHECK(memcmp(row, rgb + y * w * 3, w * 3) == 0);
+            bink2_yuv_row_c(row, v.cur[0] + y * v.stride[0],
+                            v.cur[1] + (y / 2) * v.stride[1],
+                            v.cur[2] + (y / 2) * v.stride[2], (int)w,
+                            v.range == BINK2_RANGE_STUDIO);
+            CHECK(memcmp(row, rgb + y * w * 3, w * 3) == 0);
+        }
+    }
+    bink2_video_uninit(&v);
+    free(row);
+    return 0;
+}
+
 static int test_idct_zero(void)
 {
     float old_block[64];
@@ -288,6 +333,7 @@ int main(void)
 {
     CHECK(test_geometry() == 0);
     CHECK(test_rgb() == 0);
+    CHECK(test_yuv_row_matches_frame() == 0);
     CHECK(test_idct_zero() == 0);
     CHECK(test_mc_identity() == 0);
     CHECK(test_mc_edge() == 0);

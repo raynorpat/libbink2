@@ -350,3 +350,39 @@ void bink2_mc_chroma(unsigned char *dst, int dst_stride,
         }
     }
 }
+
+void bink2_yuv_row_c(unsigned char *rgb, const unsigned char *y,
+                     const unsigned char *u, const unsigned char *v,
+                     int width, int studio_range)
+{
+    int x;
+
+    for (x = 0; x < width; x++) {
+        int yy = y[x];
+        int uu = u[x / 2] - 128;
+        int vv = v[x / 2] - 128;
+        int r, g, b;
+
+        if (!studio_range) {
+            r = yy + ((359 * vv + 128) >> 8);
+            g = yy - ((88 * uu + 183 * vv + 128) >> 8);
+            b = yy + ((454 * uu + 128) >> 8);
+        } else {
+            int sy = yy - 16;
+
+            r = (298 * sy + 409 * vv + 128) >> 8;
+            g = (298 * sy - 100 * uu - 208 * vv + 128) >> 8;
+            b = (298 * sy + 516 * uu + 128) >> 8;
+        }
+        rgb[x * 3 + 0] = (unsigned char)clip8(r);
+        rgb[x * 3 + 1] = (unsigned char)clip8(g);
+        rgb[x * 3 + 2] = (unsigned char)clip8(b);
+    }
+}
+
+void bink2_yuv_row(unsigned char *rgb, const unsigned char *y,
+                   const unsigned char *u, const unsigned char *v,
+                   int width, int studio_range)
+{
+    bink2_yuv_row_c(rgb, y, u, v, width, studio_range);
+}

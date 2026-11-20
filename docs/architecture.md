@@ -46,7 +46,8 @@ A frame call flows like this:
 
 Decoded planes are padded to 32-sample macroblock boundaries; the public
 getters report the stride and callers crop to the visible size. RGB is
-produced lazily on the first `bink2_get_video()` call for a frame.
+produced lazily on the first `bink2_get_video()` call for a frame, in row
+bands on the slice threads when the handle has them.
 
 ## Encoder
 

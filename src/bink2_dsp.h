@@ -20,4 +20,13 @@ void bink2_mc_chroma(unsigned char *dst, int dst_stride,
                      int x, int y, int frame_w, int frame_h,
                      int mvx, int mvy);
 
+/* One row of YUV 4:2:0 to packed RGB24: y has width samples, u and v have
+ * (width + 1) / 2. Full-range BT.601, or studio range when studio_range. */
+void bink2_yuv_row_c(unsigned char *rgb, const unsigned char *y,
+                     const unsigned char *u, const unsigned char *v,
+                     int width, int studio_range);
+void bink2_yuv_row(unsigned char *rgb, const unsigned char *y,
+                   const unsigned char *u, const unsigned char *v,
+                   int width, int studio_range);
+
 #endif

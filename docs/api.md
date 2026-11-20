@@ -32,7 +32,8 @@ time. One handle must not be used from two threads at once.
 The decoder decodes a frame's slices in parallel. Each handle starts its own
 worker threads on the first frame with more than one slice, uses up to one
 thread per slice (the calling thread decodes one of them), and stops them in
-`bink2_close()`. A file has 1 to 8 slices, chosen when it was encoded, so the
+`bink2_close()`. `bink2_get_video()` splits its RGB conversion across the same
+threads. A file has 1 to 8 slices, chosen when it was encoded, so the
 speedup depends on the file. The output is identical to serial decoding.
 
 The thread count is capped at the number of online CPUs. Set the environment

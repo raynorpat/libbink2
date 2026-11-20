@@ -235,6 +235,14 @@ static int test_parallel_handles(void)
     return 0;
 }
 
+/* Odd sizes leave partial chroma pairs and partial bands for RGB. */
+static int test_rgb_odd_size(void)
+{
+    CHECK(encode("test_threads_odd.bk2", 333, 251, 4) == 0);
+    CHECK(compare_modes("test_threads_odd.bk2") == 0);
+    return 0;
+}
+
 int main(void)
 {
     CHECK(test_slices_match_serial() == 0);
@@ -242,5 +250,6 @@ int main(void)
     CHECK(test_seek_after_threaded() == 0);
     CHECK(test_open_close_no_decode() == 0);
     CHECK(test_parallel_handles() == 0);
+    CHECK(test_rgb_odd_size() == 0);
     return 0;
 }

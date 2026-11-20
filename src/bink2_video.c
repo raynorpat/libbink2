@@ -1,4 +1,5 @@
 #include "bink2_video.h"
+#include "bink2_dsp.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -9,15 +10,6 @@ const uint8_t bink2_luma_repos[16] = {
 const uint8_t bink2_next_skips[16] = {
     0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 7, 0, 0
 };
-
-static int clip8(int v)
-{
-    if (v < 0)
-        return 0;
-    if (v > 255)
-        return 255;
-    return v;
-}
 
 static unsigned long le32(const unsigned char *p)
 {
@@ -543,9 +535,33 @@ int bink2_video_plane_height(const Bink2Video *v, int plane)
     return v->plane_h[plane];
 }
 
+typedef struct {
+    Bink2Video *v;
+    int bands;
+} RgbJobs;
+
+static void rgb_band_job(void *arg, int band)
+{
+    const RgbJobs *jobs = (const RgbJobs *)arg;
+    const Bink2Video *v = jobs->v;
+    int h = v->plane_h[0];
+    /* Even band edges keep each chroma row inside one band. */
+    int y0 = (int)(((long)h * band / jobs->bands) & ~1L);
+    int y1 = band + 1 == jobs->bands
+                 ? h : (int)(((long)h * (band + 1) / jobs->bands) & ~1L);
+    int y;
+
+    for (y = y0; y < y1; y++)
+        bink2_yuv_row(v->rgb + (size_t)y * v->plane_w[0] * 3,
+                      v->cur[0] + (size_t)y * v->stride[0],
+                      v->cur[1] + (size_t)(y / 2) * v->stride[1],
+                      v->cur[2] + (size_t)(y / 2) * v->stride[2],
+                      v->plane_w[0], v->range == BINK2_RANGE_STUDIO);
+}
+
 const unsigned char *bink2_video_rgb(Bink2Video *v)
 {
-    int x, y;
+    RgbJobs jobs;
 
     if (v == NULL || v->cur[0] == NULL || v->cur[1] == NULL ||
         v->cur[2] == NULL)
@@ -553,39 +569,13 @@ const unsigned char *bink2_video_rgb(Bink2Video *v)
     if (v->rgb_valid)
         return v->rgb;
 
-    for (y = 0; y < v->plane_h[0]; y++) {
-        const unsigned char *yp = v->cur[0] + (size_t)y * v->stride[0];
-        const unsigned char *up = v->cur[1] +
-            (size_t)(y / 2) * v->stride[1];
-        const unsigned char *vp = v->cur[2] +
-            (size_t)(y / 2) * v->stride[2];
-
-        for (x = 0; x < v->plane_w[0]; x++) {
-            int yy = yp[x];
-            int uu = up[x / 2] - 128;
-            int vv = vp[x / 2] - 128;
-            int r, g, b;
-
-            if (v->range == BINK2_RANGE_FULL) {
-                r = yy + ((359 * vv + 128) >> 8);
-                g = yy - ((88 * uu + 183 * vv + 128) >> 8);
-                b = yy + ((454 * uu + 128) >> 8);
-            } else {
-                int sy = yy - 16;
-
-                r = (298 * sy + 409 * vv + 128) >> 8;
-                g = (298 * sy - 100 * uu - 208 * vv + 128) >> 8;
-                b = (298 * sy + 516 * uu + 128) >> 8;
-            }
-            {
-                size_t off = ((size_t)y * v->plane_w[0] + x) * 3;
-
-                v->rgb[off + 0] = (unsigned char)clip8(r);
-                v->rgb[off + 1] = (unsigned char)clip8(g);
-                v->rgb[off + 2] = (unsigned char)clip8(b);
-            }
-        }
-    }
+    /* Use the slice threads when the decoder has started them. */
+    jobs.v = v;
+    jobs.bands = v->pool != NULL ? v->pool_workers + 1 : 1;
+    if (jobs.bands > 1)
+        bink2_pool_run(v->pool, rgb_band_job, &jobs, jobs.bands);
+    else
+        rgb_band_job(&jobs, 0);
     v->rgb_valid = 1;
     return v->rgb;
 }
