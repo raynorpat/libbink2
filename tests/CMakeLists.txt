@@ -57,6 +57,13 @@ if(TARGET bink2_dump)
   set_tests_properties(dump PROPERTIES SKIP_RETURN_CODE 77)
 endif()
 
+if(TARGET bink2_bench)
+  add_test(NAME bench_smoke COMMAND bink2_bench --iterations 2 --rgb
+    ${CMAKE_CURRENT_SOURCE_DIR}/media/synthetic_kb2j.bk2)
+  set_tests_properties(bench_smoke PROPERTIES PASS_REGULAR_EXPRESSION
+    "frames=[0-9]+ seconds=[0-9.]+ fps=[0-9.]+")
+endif()
+
 add_executable(test_player_motion test_player_motion.c
   ${CMAKE_SOURCE_DIR}/src/tools/player/bink2_motion.c)
 target_include_directories(test_player_motion PRIVATE

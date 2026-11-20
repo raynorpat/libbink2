@@ -80,6 +80,10 @@ if(BINK2_BUILD_TOOLS)
   bink2_set_compile_settings(bink2_dump)
   target_link_libraries(bink2_dump PRIVATE ${BINK2_LINK_TARGET})
 
+  add_executable(bink2_bench src/tools/bink2_bench.c)
+  bink2_set_compile_settings(bink2_bench)
+  target_link_libraries(bink2_bench PRIVATE ${BINK2_LINK_TARGET})
+
   if(NOT CMAKE_CROSSCOMPILING OR DEFINED SDL3_DIR OR DEFINED SDL2_DIR)
     if(NOT BINK2_SDL_VERSION MATCHES "^(AUTO|2|3)$")
       message(FATAL_ERROR
