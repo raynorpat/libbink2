@@ -424,38 +424,30 @@ static int new_decode_intra_chroma(Bink2Slice *s, Bink2Bits *bits,
     return 0;
 }
 
-static void update_intra_q(Bink2Slice *s, int8_t *q, int dq, int flags)
+int bink2_new_predict_q(const Bink2Slice *s, int flags, int inter)
 {
     int mb = s->mb_pos;
 
-    if ((flags & 0x20) && (flags & 0x80)) {
-        *q = (int8_t)(16 + dq);
-    } else if (flags & 0x80) {
-        *q = (int8_t)(s->q_cur[mb - 1].intra_q + dq);
-    } else if (flags & 0x20) {
-        *q = (int8_t)(s->q_prev[mb].intra_q + dq);
-    } else {
-        *q = (int8_t)(new_mid_pred(s->q_prev[mb].intra_q,
-                                   s->q_cur[mb - 1].intra_q,
-                                   s->q_prev[mb - 1].intra_q) + dq);
-    }
+#define Q(entry) (inter ? (entry).inter_q : (entry).intra_q)
+    if ((flags & 0x20) && (flags & 0x80))
+        return 16;
+    if (flags & 0x80)
+        return Q(s->q_cur[mb - 1]);
+    if (flags & 0x20)
+        return Q(s->q_prev[mb]);
+    return new_mid_pred(Q(s->q_prev[mb]), Q(s->q_cur[mb - 1]),
+                        Q(s->q_prev[mb - 1]));
+#undef Q
+}
+
+static void update_intra_q(Bink2Slice *s, int8_t *q, int dq, int flags)
+{
+    *q = (int8_t)(bink2_new_predict_q(s, flags, 0) + dq);
 }
 
 static void update_inter_q(Bink2Slice *s, int8_t *q, int dq, int flags)
 {
-    int mb = s->mb_pos;
-
-    if ((flags & 0x20) && (flags & 0x80)) {
-        *q = (int8_t)(16 + dq);
-    } else if (flags & 0x80) {
-        *q = (int8_t)(s->q_cur[mb - 1].inter_q + dq);
-    } else if (flags & 0x20) {
-        *q = (int8_t)(s->q_prev[mb].inter_q + dq);
-    } else {
-        *q = (int8_t)(new_mid_pred(s->q_prev[mb].inter_q,
-                                   s->q_cur[mb - 1].inter_q,
-                                   s->q_prev[mb - 1].inter_q) + dq);
-    }
+    *q = (int8_t)(bink2_new_predict_q(s, flags, 1) + dq);
 }
 
 uint8_t bink2_new_read_btype(Bink2Bits *bits, uint8_t lru[4])
@@ -542,8 +534,8 @@ int bink2_new_read_mv(Bink2Bits *bits, int mv[4][2], int *nb)
 
 #define MV(arr, mb, k, c) ((arr)[(mb) * 8 + (k) * 2 + (c)])
 
-static void new_predict_mv(Bink2Slice *s, int flags, const int raw[4][2],
-                           int nb)
+void bink2_new_predict_mv(Bink2Slice *s, int flags, const int raw[4][2],
+                          int nb)
 {
     int mb = s->mb_pos;
     int lm = mb > 0 ? mb - 1 : 0;
@@ -910,7 +902,7 @@ int bink2_video_decode_slice_new(Bink2Video *v, Bink2Slice *s, Bink2Bits *bits,
                                            s->dc_prev[mb].dc[2]);
                     }
                 }
-                new_predict_mv(s, flags, raw, 0);
+                bink2_new_predict_mv(s, flags, raw, 0);
                 update_inter_q(s, inter_q, 0, flags);
                 dq = new_decode_dq(bits);
                 if (bink2_bits_failed(bits))
@@ -961,7 +953,7 @@ int bink2_video_decode_slice_new(Bink2Video *v, Bink2Slice *s, Bink2Bits *bits,
                 update_inter_q(s, inter_q, 0, flags);
                 if (bink2_new_read_mv(bits, raw, &nb) != 0)
                     return BINK2_ERROR;
-                new_predict_mv(s, flags, raw, nb);
+                bink2_new_predict_mv(s, flags, raw, nb);
                 bink2_video_mc_luma(v, s, x, y);
                 bink2_video_mc_chroma(v, s, x, y);
                 bink2_video_store_motion(v, s, x, y, nb);
@@ -970,7 +962,7 @@ int bink2_video_decode_slice_new(Bink2Video *v, Bink2Slice *s, Bink2Bits *bits,
                 update_intra_q(s, intra_q, 0, flags);
                 if (bink2_new_read_mv(bits, raw, &nb) != 0)
                     return BINK2_ERROR;
-                new_predict_mv(s, flags, raw, nb);
+                bink2_new_predict_mv(s, flags, raw, nb);
                 dq = new_decode_dq(bits);
                 if (bink2_bits_failed(bits))
                     return BINK2_ERROR;
