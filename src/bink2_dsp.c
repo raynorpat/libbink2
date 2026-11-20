@@ -43,7 +43,7 @@ static void idct_1d_old(float *blk, int step)
     blk[7 * step] = t08 - t12;
 }
 
-void bink2_idct_old(float *block)
+void bink2_idct_old(float block[64])
 {
     int i, j;
 

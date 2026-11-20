@@ -8,7 +8,7 @@
  * references, kept in every build so tests can compare against them.
  * Define BINK2_NO_SIMD (CMake -DBINK2_SIMD=OFF) to use only scalar code. */
 #if !defined(BINK2_NO_SIMD)
-#if defined(__ARM_NEON) || defined(__ARM_NEON__)
+#if defined(__ARM_NEON) || defined(__ARM_NEON__) || defined(_M_ARM64)
 #define BINK2_SIMD_NEON 1
 #elif defined(__SSE2__) || defined(_M_X64) || \
     (defined(_M_IX86_FP) && _M_IX86_FP >= 2)
@@ -75,7 +75,8 @@ void bink2_yuv_row(unsigned char *rgb, const unsigned char *y,
 #endif
 
 /* Round-to-nearest-even float conversion needs AArch64 NEON (vcvtnq). */
-#if (defined(BINK2_SIMD_NEON) && defined(__aarch64__)) || \
+#if (defined(BINK2_SIMD_NEON) && \
+     (defined(__aarch64__) || defined(_M_ARM64))) || \
     defined(BINK2_SIMD_SSE2)
 #define BINK2_SIMD_FLOAT_BLOCK 1
 #endif
