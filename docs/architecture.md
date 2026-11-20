@@ -28,7 +28,8 @@ docs/                format notes, API and tool reference
 | `bink2_video.c/.h` | Plane allocation, slice layout, motion compensation, DC prediction, RGB conversion, motion-vector storage. |
 | `bink2_video_old.c` | `KB2f` slice syntax (float IDCT, per-component quantisers). |
 | `bink2_video_new.c/.h` | `KB2g`+ slice syntax (integer IDCT, LRU block types). |
-| `bink2_dsp.c/.h` | IDCTs and block put/add. |
+| `bink2_dsp.c/.h` | IDCTs, block put/add, motion compensation, YUV to RGB rows; scalar `*_c` references and the dispatch to SIMD. |
+| `bink2_dsp_neon.c`, `bink2_dsp_sse2.c` | NEON and SSE2 versions of the DSP routines, compiled in when the target has them. |
 | `bink2_tables.c/.h` | Codebooks, scan orders, quantiser matrices. |
 | `bink2_audio.c/.h` | Bink Audio 2. |
 | `bink2_thread.c/.h` | The slice thread pool (POSIX or Win32 threads), CPU count, `BINK2_THREADS`. |
@@ -115,6 +116,16 @@ walk did, so a damaged frame fails identically either way. The pool is
 created lazily, so a `Bink2Video` that never decodes (the encoder's) never
 starts threads. `test_threads` compares threaded and serial output frame by
 frame.
+
+### SIMD is compile-time and bit-exact
+
+`bink2_dsp.h` defines `BINK2_SIMD_NEON` on arm64 and `BINK2_SIMD_SSE2` on
+x86-64 (unless `BINK2_NO_SIMD`, from `-DBINK2_SIMD=OFF`), and each public DSP
+routine calls the matching version. There is no runtime CPU detection: both
+are baseline for their architecture. Every SIMD routine must equal its scalar
+`*_c` reference bit for bit, including saturation and truncation;
+`test_dsp_simd` compares them on random and edge-case inputs. The `KB2f` float
+IDCT stays scalar because reordering float operations changes its output.
 
 ### Untrusted input
 

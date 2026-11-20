@@ -36,7 +36,13 @@ endfunction()
 set(BINK2_DECODER_SOURCES
   src/bink2.c src/bink2_bits.c src/bink2_dsp.c src/bink2_tables.c
   src/bink2_video.c src/bink2_video_old.c src/bink2_video_new.c
-  src/bink2_audio.c src/bink2_thread.c)
+  src/bink2_audio.c src/bink2_thread.c src/bink2_dsp_neon.c
+  src/bink2_dsp_sse2.c)
+
+option(BINK2_SIMD "Use the NEON/SSE2 DSP routines" ON)
+if(NOT BINK2_SIMD)
+  add_compile_definitions(BINK2_NO_SIMD)
+endif()
 
 find_package(Threads REQUIRED)
 

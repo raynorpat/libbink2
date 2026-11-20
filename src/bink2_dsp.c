@@ -119,7 +119,7 @@ static void idct_1d_new(int16_t *blk, int step, int shift)
     blk[7 * step] = (int16_t)((tmp0  - tmp9)  >> shift);
 }
 
-void bink2_idct_new(int32_t block[64])
+void bink2_idct_new_c(int32_t block[64])
 {
     int16_t tmp[64];
     int i;
@@ -134,7 +134,8 @@ void bink2_idct_new(int32_t block[64])
         block[i] = tmp[i];
 }
 
-void bink2_put_block(unsigned char *dst, int stride, const int32_t block[64])
+void bink2_put_block_c(unsigned char *dst, int stride,
+                       const int32_t block[64])
 {
     int i, j;
 
@@ -145,7 +146,8 @@ void bink2_put_block(unsigned char *dst, int stride, const int32_t block[64])
     }
 }
 
-void bink2_add_block(unsigned char *dst, int stride, const int32_t block[64])
+void bink2_add_block_c(unsigned char *dst, int stride,
+                       const int32_t block[64])
 {
     int i, j;
 
@@ -154,6 +156,33 @@ void bink2_add_block(unsigned char *dst, int stride, const int32_t block[64])
             dst[j] = (unsigned char)clip8((int)dst[j] + block[j * 8 + i]);
         dst += stride;
     }
+}
+
+void bink2_idct_new(int32_t block[64])
+{
+#if defined(BINK2_SIMD)
+    BINK2_SIMD(bink2_idct_new)(block);
+#else
+    bink2_idct_new_c(block);
+#endif
+}
+
+void bink2_put_block(unsigned char *dst, int stride, const int32_t block[64])
+{
+#if defined(BINK2_SIMD)
+    BINK2_SIMD(bink2_put_block)(dst, stride, block);
+#else
+    bink2_put_block_c(dst, stride, block);
+#endif
+}
+
+void bink2_add_block(unsigned char *dst, int stride, const int32_t block[64])
+{
+#if defined(BINK2_SIMD)
+    BINK2_SIMD(bink2_add_block)(dst, stride, block);
+#else
+    bink2_add_block_c(dst, stride, block);
+#endif
 }
 
 #define EDGE_STRIDE 32
