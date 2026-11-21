@@ -88,7 +88,8 @@ which revisions they cover.
 DC reconstruction and deblocking run as a single-threaded whole-frame pass
 after the slice threads join, so decode speed drops when they are on. On
 `ge_video_86l.bk2` it fell from about 2590 to about 1834 frames per second
-after deblocking was added.
+after deblocking was added (one macOS Apple-silicon measurement, taken
+before the DC pass; treat it as indicative only).
 
 The `KB2f` float IDCT depends on how multiply-adds are rounded. The oracle's
 build fused three of them, so `idct_1d_old` writes those three with `fmaf()`

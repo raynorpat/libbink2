@@ -1,6 +1,7 @@
 # Decoder performance: slice threading and SIMD
 
-Status: design, not yet implemented.
+Status: design, not yet implemented. (Historical: the post-reconstruction
+filters have since been added; see [bink2.md](bink2.md#post-reconstruction-filters).)
 
 ## Intent
 
@@ -33,7 +34,9 @@ bounded by the file's slice count, which the encoder chose, not the decoder.
 - Re-slicing a frame more finely than the file's slices. `KB2f` files always
   have 2 slices, `KB2g` 1 or 2, and `KB2h`+ 2, 3, 4 or 8.
 - Frame-level threading (decoding frame N+1 while N is displayed).
-- The in-loop deblocking filter, which neither the oracle nor libbink2 has.
+- The in-loop deblocking filter, which neither the oracle nor libbink2 had
+  when this was written. (libbink2 has since added it, DC reconstruction and
+  the residual edge filter; see [bink2.md](bink2.md#post-reconstruction-filters).)
 - AVX2, AVX-512, SVE, or runtime CPU dispatch.
 - Audio decoding speed.
 
