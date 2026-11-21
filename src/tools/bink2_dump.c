@@ -49,8 +49,26 @@ static int write_ppm(const char *outdir, unsigned long frame,
     return 0;
 }
 
+static int write_plane(FILE *file, const unsigned char *plane, int width,
+                       int height, int stride)
+{
+    int y;
+
+    for (y = 0; y < height; y++) {
+        if (fwrite(plane, 1, (size_t)width, file) != (size_t)width)
+            return -1;
+        plane += stride;
+    }
+    return 0;
+}
+
+#define DUMP_USAGE "usage: bink2_dump [--frames N] [--no-filters] " \
+                   "[--yuv out.yuv] file.bk2 [outdir]\n"
+
 int main(int argc, char **argv)
 {
+    const char *yuv_path = NULL;
+    FILE *yuv = NULL;
     const char *path = NULL;
     const char *outdir = ".";
     unsigned long limit = 0;
@@ -67,11 +85,12 @@ int main(int argc, char **argv)
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--frames") == 0 && i + 1 < argc) {
             limit = strtoul(argv[++i], NULL, 10);
+        } else if (strcmp(argv[i], "--yuv") == 0 && i + 1 < argc) {
+            yuv_path = argv[++i];
         } else if (strcmp(argv[i], "--no-filters") == 0) {
             filters = 0;
         } else if (argv[i][0] == '-' && argv[i][1] != '\0') {
-            fprintf(stderr, "usage: bink2_dump [--frames N] [--no-filters] "
-                            "file.bk2 [outdir]\n");
+            fputs(DUMP_USAGE, stderr);
             return 2;
         } else if (path == NULL) {
             path = argv[i];
@@ -80,8 +99,7 @@ int main(int argc, char **argv)
         }
     }
     if (path == NULL) {
-        fprintf(stderr, "usage: bink2_dump [--frames N] [--no-filters] "
-                        "file.bk2 [outdir]\n");
+        fputs(DUMP_USAGE, stderr);
         return 2;
     }
 
@@ -99,6 +117,15 @@ int main(int argc, char **argv)
     }
     printf("%s: %lux%lu, %lu frames, %.3f fps\n", path, width, height,
            frame_count, usf > 0.0 ? 1000000.0 / usf : 0.0);
+
+    if (yuv_path != NULL) {
+        yuv = fopen(yuv_path, "wb");
+        if (yuv == NULL) {
+            fprintf(stderr, "bink2_dump: cannot create %s\n", yuv_path);
+            bink2_close(b);
+            return 1;
+        }
+    }
 
     bink2_enable_filters(b, (unsigned char)filters);
     if (bink2_enable_video(b, 1) != 0) {
@@ -141,7 +168,22 @@ int main(int argc, char **argv)
                           (int)((height + 1) >> 1),
                           bink2_get_stride(b, BINK2_PLANE_V)));
 
-        if (write_ppm(outdir, frame, rgb, width, height) != 0) {
+        if (yuv != NULL) {
+            int cw = (int)((width + 1) >> 1);
+            int ch = (int)((height + 1) >> 1);
+
+            if (write_plane(yuv, y, (int)width, (int)height,
+                            bink2_get_stride(b, BINK2_PLANE_Y)) != 0 ||
+                write_plane(yuv, u, cw, ch,
+                            bink2_get_stride(b, BINK2_PLANE_U)) != 0 ||
+                write_plane(yuv, v, cw, ch,
+                            bink2_get_stride(b, BINK2_PLANE_V)) != 0) {
+                fprintf(stderr, "bink2_dump: cannot write %s\n", yuv_path);
+                fclose(yuv);
+                bink2_close(b);
+                return 1;
+            }
+        } else if (write_ppm(outdir, frame, rgb, width, height) != 0) {
             bink2_close(b);
             return 1;
         }
@@ -159,6 +201,11 @@ int main(int argc, char **argv)
         }
     }
 
+    if (yuv != NULL && fclose(yuv) != 0) {
+        fprintf(stderr, "bink2_dump: cannot close %s\n", yuv_path);
+        bink2_close(b);
+        return 1;
+    }
     bink2_close(b);
     return 0;
 }

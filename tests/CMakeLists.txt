@@ -53,6 +53,13 @@ target_compile_definitions(test_decode_g PRIVATE
 add_test(NAME decode_g COMMAND test_decode_g)
 set_tests_properties(decode_g PROPERTIES SKIP_RETURN_CODE 77)
 
+add_executable(test_decode_filtered test_decode_filtered.c)
+target_link_libraries(test_decode_filtered PRIVATE ${BINK2_LINK_TARGET})
+target_compile_definitions(test_decode_filtered PRIVATE
+  BINK2_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/media")
+add_test(NAME decode_filtered COMMAND test_decode_filtered)
+set_tests_properties(decode_filtered PROPERTIES SKIP_RETURN_CODE 77)
+
 add_executable(test_malformed test_malformed.c)
 target_link_libraries(test_malformed PRIVATE ${BINK2_LINK_TARGET})
 target_compile_definitions(test_malformed PRIVATE

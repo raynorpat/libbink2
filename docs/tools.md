@@ -11,7 +11,7 @@ cmake --build build
 | Tool | Purpose | Requires |
 | --- | --- | --- |
 | `bink2_build` | Encode images to a `.bk2` file | `BINK2_BUILD_ENCODER=ON` (the default) |
-| `bink2_dump` | Decode a `.bk2` file to PPM frames and print plane checksums | nothing extra |
+| `bink2_dump` | Decode a `.bk2` file to PPM frames (or raw YUV) and print plane checksums | nothing extra |
 | `bink2_bench` | Time video decoding of a `.bk2` file | nothing extra |
 | `bink2_sdl_player` | Play with the SDL renderer, with audio | SDL3 or SDL2 |
 | `bink2_sdlgl_player` | Play with SDL + OpenGL 3.2 | SDL3 or SDL2 |
@@ -90,7 +90,7 @@ The output is `KB2j` video with an optional single audio track. See
 ## bink2_dump
 
 ```
-bink2_dump [--frames N] [--no-filters] file.bk2 [outdir]
+bink2_dump [--frames N] [--no-filters] [--yuv out.yuv] file.bk2 [outdir]
 ```
 
 Decodes video and writes `frame_00000.ppm`, `frame_00001.ppm`, ... into
@@ -98,6 +98,9 @@ Decodes video and writes `frame_00000.ppm`, `frame_00001.ppm`, ... into
 `--frames N` stops after `N` frames. `--no-filters` calls
 `bink2_enable_filters(b, 0)`; use it when comparing with the golden values
 in `tests/reference_checksums.h`, which are captured without the filters.
+`--yuv out.yuv` writes every frame's visible Y, U, and V planes as planar
+4:2:0 (no padding) to `out.yuv` instead of writing PPM files;
+`tests/capture_filtered.sh` uses it.
 
 It prints a header line, then one line per frame with the FNV-1a hash of each
 visible plane:
