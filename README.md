@@ -24,9 +24,11 @@ The encoder writes `KB2j` from RGB images (PPM, BMP, PNG, JPEG) or a YUV
 source and supports quality and target-bitrate modes plus one optional
 Bink Audio 2 WAV track; see `docs/encoder.md`. It does not write alpha.
 
-The in-loop deblocking filter is not implemented on decode, matching the
-pinned FFmpeg reference; decoded output differs from RAD's decoder by a few
-levels around block edges.
+The decoder applies RAD's in-loop post-reconstruction filters (residual edge
+filter, DC reconstruction, deblocking) by default, derived from study of RAD's
+decoder; `bink2_enable_filters(b, 0)` turns them off, which matches the pinned
+FFmpeg reference. `KB2l` and `KB2n` are not covered and decode unfiltered. See
+`docs/bink2.md`.
 
 ## Build
 

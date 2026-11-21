@@ -188,7 +188,9 @@ macroblock and `0` otherwise. It returns `1` when the data is available.
 | Alpha | `KB2f` only; `KB2g`+ alpha files fail to open |
 | Audio | Bink Audio 2, up to seven tracks |
 | Seeking | Keyframes only |
-| Deblocking | Not implemented; see [bink2.md](bink2.md#known-divergence) |
+| Deblocking | `KB2f`, `KB2g`, `KB2h`, `KB2i`, `KB2j`, `KB2k`, `KB2m`; `KB2l` and `KB2n` decode unfiltered; see [bink2.md](bink2.md#post-reconstruction-filters) |
+| DC reconstruction | Same revisions as deblocking |
+| Residual edge filter | `KB2g`, `KB2h`, `KB2i`, `KB2j`, `KB2k`, `KB2m` (no such stage in `KB2f`) |
 
 ## Encoder (`bink2_encoder.h`)
 

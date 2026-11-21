@@ -56,8 +56,9 @@ BINK2_ORACLE="$PWD/build/oracle/FFmpeg-bink2/ffmpeg" \
 Without `BINK2_ORACLE` the test reports `Skipped` (exit code 77). It writes
 temporary files in the current directory and removes them.
 
-The oracle does not implement Bink 2's in-loop deblocking filter, which is
-the documented correctness target for `libbink2`.
+The oracle does not implement RAD's in-loop filters, so its output matches
+`libbink2` only with the filters off (`bink2_dump --no-filters`). The
+filtered output has no external reference; `filtered_checksums.h` pins it.
 
 The decoded `ge_video_86l.bk2` luma spans 0–255 (not 16–235), so the
 library's default RGB conversion is full-range BT.601. `sc13` fades in from

@@ -69,14 +69,26 @@ bands on the slice threads when the handle has them.
 
 ## Design decisions
 
-### The pinned FFmpeg tree is the correctness target
+### Two correctness paths: FFmpeg with filters off, our own with them on
 
-RAD has not published a Bink 2 specification. The decoder is a port of the
-unmerged FFmpeg Bink 2 patches at one pinned commit, and the golden checksums
-in `tests/reference_checksums.h` are generated from that same build. "Correct"
-means bit-identical video to the pinned oracle, not to RAD's decoder. The one
-known gap between the two is the in-loop deblocking filter, which neither the
-oracle nor libbink2 implements.
+RAD has not published a Bink 2 specification. The decoder began as a port of
+the unmerged FFmpeg Bink 2 patches at one pinned commit, and the golden
+checksums in `tests/reference_checksums.h` are generated from that build.
+FFmpeg does not run RAD's post-reconstruction filters, so those checksums
+cover the filters-off path (`bink2_enable_filters(b, 0)`), where "correct"
+means bit-identical to the pinned oracle.
+
+With the filters on, which is the default, there is no external reference.
+`tests/filtered_checksums.h` pins libbink2's own filtered output so that
+changes to the filter code are visible. It is a regression guard, not a
+correctness reference. The filters are derived from study of RAD's decoder;
+see [bink2.md](bink2.md#post-reconstruction-filters) for what they do and
+which revisions they cover.
+
+DC reconstruction and deblocking run as a single-threaded whole-frame pass
+after the slice threads join, so decode speed drops when they are on. On
+`ge_video_86l.bk2` it fell from about 2590 to about 1834 frames per second
+after deblocking was added.
 
 The `KB2f` float IDCT depends on how multiply-adds are rounded. The oracle's
 build fused three of them, so `idct_1d_old` writes those three with `fmaf()`

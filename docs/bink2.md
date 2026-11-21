@@ -7,7 +7,9 @@ unmerged FFmpeg Bink 2 patch (`bink2.c`, `bink2g.c`, `bink2f.c`,
 `binkaudio.c`) at commit `f4904840e820bfd0fb8fbc22179b39dfdbd3a9e0` and the
 public Reverse-engineering notes on MultimediaWiki and
 <https://codecs.multimedia.cx>. Where they differ, libbink2 follows the
-pinned FFmpeg tree because the golden checksums come from it.
+pinned FFmpeg tree because the golden checksums come from it. The
+post-reconstruction filters are the exception; see
+[Post-reconstruction filters](#post-reconstruction-filters).
 
 ## Attribution
 
@@ -102,13 +104,49 @@ Bink 2 uses Bink Audio 2: the same transform layout as Bink Audio 1, but with
 several transform blocks; libbink2 decodes blocks until the chunk ends. The
 first block's overlap tail is used by the next block; seeking clears it.
 
-## Known divergence
+## Post-reconstruction filters
 
-The in-loop deblocking filter is not implemented. Neither the pinned FFmpeg
-tree nor NihAV implements it. Decoded output therefore differs from RAD's
-decoder by a few levels around block edges, while matching the pinned
-reference bit-for-bit.
+RAD's decoder runs three stages that the pinned FFmpeg tree and NihAV lack.
+libbink2 implements them, derived from study of RAD's decoder. All three are
+in-loop: the next frame predicts from the processed picture, not the raw
+reconstruction. They are on by default and turned off with
+`bink2_enable_filters(b, 0)`, which takes effect at the next keyframe.
 
-The post-filter "block reconstruction from DCs" path described in the
-reverse-engineering notes is likewise omitted; it is a reconstruction
-refinement, not bitstream syntax.
+- **Residual edge filter (R).** It applies to inter macroblocks that carry
+  both motion and a coded residual, in new-syntax frames. It smooths the
+  internal 8x8 edges of the residual after the IDCT and before the residual
+  is added to the prediction. Frame flag `0x40000` disables it, `0x4000`
+  drops the vertical edges and `0x8000` the horizontal ones.
+- **DC reconstruction.** An intra block with no AC coefficients is replaced
+  by a smooth surface interpolated from the DC values of usable neighbouring
+  blocks. No frame flag disables it. Frames with flag `0x2000` use an integer
+  form and `KB2f` frames use a floating-point form.
+- **Deblocking (DB).** A 4-tap filter across the 8x8 block grid on Y, U and
+  V. Frame flag `0x4000` disables vertical edges and `0x8000` horizontal
+  edges, and the per-row and per-column arrays of flag `0x10000` disable
+  single edges. A frame whose arrays run past the end of the packet is
+  rejected.
+
+DC reconstruction and deblocking run as one whole-frame pass after every
+slice has been decoded. Residual filtering happens inside macroblock
+decoding.
+
+Coverage by revision:
+
+| Revisions | R | DC | DB |
+| --- | --- | --- | --- |
+| `KB2f` | none (syntax has no such macroblocks) | yes | yes |
+| `KB2g`, `KB2h`, `KB2i`, `KB2j`, `KB2k`, `KB2m` | yes | yes | yes |
+| `KB2l`, `KB2n` | no | no | no |
+
+### Remaining differences from RAD
+
+- `KB2l` and `KB2n` are not covered; the RAD decoder that was studied
+  rejects them, so they decode without any filter stage.
+- RAD chooses the old or new slice syntax per frame from flag `0x2000`;
+  libbink2 chooses it once from the revision.
+- RAD uses a single slice for `KB2h` and later videos under 128 pixels high.
+
+The FFmpeg-derived golden checksums in `tests/reference_checksums.h` cover
+only the filters-off path. `tests/filtered_checksums.h` pins libbink2's own
+filtered output; it is a regression guard, not a correctness reference.

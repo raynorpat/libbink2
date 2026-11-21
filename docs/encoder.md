@@ -123,9 +123,11 @@ reconstruction.
 The reconstruction is the filtered picture. DC reconstruction has no opt-out,
 so a decoder that skips the filter stages, either libbink2 with
 `bink2_enable_filters(b, 0)` or the pinned FFmpeg reference, shows pixels that
-differ from `recon` in DC-only blocks and around block edges, and the
+differ from `recon` in DC-only blocks, and the
 difference carries into later inter frames through the reference. This drift
-is accepted. `test_enc_inter` (`recon_matches_unfiltered_off`) pins it: the
+is accepted. With the frame flags the encoder writes, deblocking and the
+residual edge filter change no pixels in its `KB2j` output; only DC
+reconstruction does. `test_enc_inter` (`recon_matches_unfiltered_off`) pins it: the
 unfiltered decode differs from `recon` exactly when `bink2_filter_covers('j',
 stage)` holds for a stage that changes the clip.
 
