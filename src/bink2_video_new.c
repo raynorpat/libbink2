@@ -378,7 +378,7 @@ static void new_idct_put(unsigned char *dst, int stride,
 }
 
 /* The intra info word of a block: dc is an integer in 0..2047. */
-static unsigned intra_word(float dc, int symbols)
+unsigned bink2_new_intra_word(float dc, int symbols)
 {
     return BINK2_INFO_INTRA |
            (bink2_video_ac_class(symbols) << BINK2_INFO_CLASS_SHIFT) |
@@ -418,7 +418,7 @@ static int new_decode_intra_luma(Bink2Video *v, Bink2Slice *s, Bink2Bits *bits,
             block[j][0] = (int16_t)(dc[i * 4 + j] * 8.0f + 32.0f);
             new_idct_put(dst + off, stride, block[j]);
             bink2_video_set_info(v, plane, x, y, pos & 3, pos >> 2,
-                                 intra_word(dc[i * 4 + j], symbols[j]));
+                                 bink2_new_intra_word(dc[i * 4 + j], symbols[j]));
         }
     }
     return 0;
@@ -452,7 +452,7 @@ static int new_decode_intra_chroma(Bink2Video *v, Bink2Slice *s,
         block[i][0] = (int16_t)(dc[i] * 8.0f + 32.0f);
         new_idct_put(dst + off, stride, block[i]);
         bink2_video_set_info(v, plane, x, y, i & 1, i >> 1,
-                             intra_word(dc[i], symbols[i]));
+                             bink2_new_intra_word(dc[i], symbols[i]));
     }
     return 0;
 }

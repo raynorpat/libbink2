@@ -197,6 +197,10 @@ static int encode_luma(Bink2BitWriter *bw, Bink2Video *v,
 
         reconstruct_block(v, 0, x + bx, y + by, levels[idx],
                           bink2g_luma_intra_qmat, q, dc_actual[idx]);
+        bink2_video_set_info(v, 0, x, y, pos & 3, pos >> 2,
+                             bink2_new_intra_word(
+                                 (float)dc_actual[idx],
+                                 bink2_new_ac_symbols(levels[idx])));
     }
     return 0;
 }
@@ -247,6 +251,10 @@ static int encode_chroma(Bink2BitWriter *bw, Bink2Video *v,
 
         reconstruct_block(v, plane, cx + bx, cy + by, levels[idx],
                           bink2g_chroma_intra_qmat, q, dc_actual[idx]);
+        bink2_video_set_info(v, plane, x, y, idx & 1, idx >> 1,
+                             bink2_new_intra_word(
+                                 (float)dc_actual[idx],
+                                 bink2_new_ac_symbols(levels[idx])));
     }
     return 0;
 }
@@ -582,6 +590,7 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
                 update_inter_q(v, &v->slice[0].q_cur[mb].inter_q, 0, flags);
                 update_intra_q(v, &v->slice[0].q_cur[mb].intra_q, 0, flags);
                 bink2_video_copy_mb(v, x, y);
+                bink2_video_clear_info(v, x, y);
                 count_block(stats, type);
                 continue;
                 }
@@ -627,6 +636,7 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
                 }
             }
             bink2_video_store_motion(v, &v->slice[0], x, y, nb);
+            bink2_video_clear_info(v, x, y);
             count_block(stats, type);
         }
 
@@ -673,6 +683,12 @@ int bink2_enc_encode_frame(Bink2BitWriter *bw, Bink2Frame *frame,
     int s;
 
     v->frame_flags = keyframe ? FRAME_FLAGS_INTRA : FRAME_FLAGS_INTER;
+    /* Mirror what the decoder reads from the frame header: a keyframe
+     * disables every horizontal edge (see frame_header). */
+    memset(v->row_flags, 0, (size_t)v->row_size + 1);
+    memset(v->col_flags, 0, (size_t)v->col_size + 1);
+    if (keyframe)
+        memset(v->row_flags + 1, 1, (size_t)v->row_size);
     ref_view.y = v->ref[0];
     ref_view.u = v->ref[1];
     ref_view.v = v->ref[2];
@@ -703,6 +719,9 @@ int bink2_enc_encode_frame(Bink2BitWriter *bw, Bink2Frame *frame,
         return -1;
     for (s = 1; s < slices; s++)
         put_le32(bw->data + 4 + 4 * (s - 1), offsets[s]);
+    /* Run the decoder's DC reconstruction and deblocking so the recon and
+     * the next reference match what the decoder shows. */
+    bink2_video_apply_filters(v);
     copy_reconstruction(frame, v);
     update_reference(v);
     return 0;

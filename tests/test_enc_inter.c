@@ -2,10 +2,12 @@
 #include "bink2_encoder.h"
 #include "bink2_enc_internal.h"
 #include "bink2_enc_motion.h"
+#include "bink2_filter.h"
 
 #include "test_common.h"
 
 #include <stdio.h>
+#include <string.h>
 
 #define TEST_WIDTH 320
 #define TEST_HEIGHT 240
@@ -15,6 +17,9 @@ static unsigned char source_y(int x, int y, unsigned long frame)
 {
     int base = (x + y) & 0xFF;
 
+    /* A flat band gives the intra frame DC-only blocks. */
+    if (y >= 192)
+        return 100;
     if (frame == 2 || frame == 3) {
         int sx = x - 8;
 
@@ -49,6 +54,23 @@ static int read_yuv(void *user, unsigned long frame, unsigned char *y,
             v[row * cw + x] =
                 (unsigned char)((128 - row + (int)frame) & 0xFF);
         }
+    return 0;
+}
+
+static int check_plane_quiet(bink2 b, int plane, const unsigned char *ref,
+                             int width, int height)
+{
+    const unsigned char *p;
+    int stride, row;
+
+    p = bink2_get_plane(b, plane);
+    stride = bink2_get_stride(b, plane);
+    if (p == NULL || stride <= 0)
+        return 1;
+    for (row = 0; row < height; row++)
+        if (memcmp(p + (size_t)row * stride, ref + (size_t)row * width,
+                   (size_t)width) != 0)
+            return 1;
     return 0;
 }
 
@@ -178,6 +200,36 @@ int main(void)
     }
     fclose(file);
     bink2_close(b);
+
+    /* Decoding with the filters off must differ from recon exactly when
+     * KB2j is covered by a stage that changes this clip. DC reconstruction
+     * has no opt-out, so the stage list includes it and the clip has DC-only
+     * blocks in the flat band. */
+    {
+        int covered = bink2_filter_covers('j', BINK2_STAGE_DEBLOCK) ||
+                      bink2_filter_covers('j', BINK2_STAGE_DCRECON);
+        int differs = 0;
+
+        b = bink2_open_file("test_enc_inter.bk2", BINK2_MODE_DISK);
+        CHECK(b != NULL);
+        CHECK(bink2_enable_video(b, 1) == 0);
+        CHECK(bink2_enable_filters(b, 0) == 0);
+        file = fopen("test_enc_inter_recon.yuv", "rb");
+        CHECK(file != NULL);
+        for (f = 0; f < TEST_FRAMES; f++) {
+            int status = f == 0 ? bink2_first(b) : bink2_next(b);
+
+            CHECK(status != BINK2_ERROR);
+            CHECK(fread(ref, 1, y_size, file) == y_size);
+            if (check_plane_quiet(b, 0, ref, TEST_WIDTH, TEST_HEIGHT))
+                differs = 1;
+            CHECK(fread(ref, 1, c_size * 2, file) == c_size * 2);
+        }
+        fclose(file);
+        bink2_close(b);
+        CHECK(covered == 1);
+        CHECK(differs == covered);
+    }
     free(ref);
 
     remove("test_enc_inter.bk2");

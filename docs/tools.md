@@ -207,7 +207,9 @@ tools/validate.sh file.bk2
 ```
 
 A maintainer script, not an installed tool. It runs the pinned FFmpeg Bink 2
-oracle over a file and fails if the oracle prints any diagnostic. It needs the
+oracle over a file and fails if the oracle prints any diagnostic. It checks
+diagnostics only, not filtered pixels: the oracle does not run the decoder's
+filter stages, so its output differs from libbink2's for `KB2j`. It needs the
 oracle binary, which `tests/capture_reference.sh` builds into `build/oracle/`;
 see [tests/README.md](../tests/README.md) and
 [encoder.md](encoder.md#validation).

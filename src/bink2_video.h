@@ -150,6 +150,9 @@ unsigned bink2_video_ac_class(int symbols);
  * alpha) adds RAD's single-precision 0.49999991f before truncating; chroma
  * passes 0 and truncates. */
 unsigned bink2_video_old_intra_word(float dc, int symbols, int round);
+
+/* The info word of an intra KB2g+ block: dc is an integer in 0..2047. */
+unsigned bink2_new_intra_word(float dc, int symbols);
 /* Stores the info word of block (bx, by) of the macroblock at luma (x, y)
  * in plane p; bx and by count 8x8 blocks inside the macroblock. */
 void bink2_video_set_info(Bink2Video *v, int p, int x, int y, int bx, int by,

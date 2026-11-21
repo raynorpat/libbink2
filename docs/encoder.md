@@ -107,18 +107,27 @@ sync.
 ## Reconstruction guarantee
 
 For every encoded frame the encoder reconstructs with the same dequantise,
-integer IDCT, put/add, and motion-compensation functions the decoder uses.
-`recon_path` therefore matches the decoder's visible planes exactly; the tests
-compare every frame byte for byte. Motion search, mode decisions, and rate
-control may be lossy, but they never make the decoder disagree with the
+integer IDCT, put/add, and motion-compensation functions the decoder uses,
+and then runs the decoder's own filter stages (`bink2_video_apply_filters`:
+DC reconstruction, then deblocking) on the result before it writes the recon
+and copies the picture into the reference. The encoder also records the
+per-block info words and the header edge flags the decoder derives, so the
+filters see the same inputs. `recon_path` therefore matches the decoder's
+visible planes exactly with the filters on (the default); the tests compare
+every frame byte for byte. Motion search, mode decisions, and rate control
+may be lossy, but they never make the decoder disagree with the
 reconstruction.
 
 ## Known divergence
 
-The decoder does not implement Bink 2's in-loop deblocking filter, matching the
-pinned FFmpeg reference. Decoded output therefore differs from RAD's decoder by
-a few levels around block edges. The encoder's `KB2j` subset and its
-reconstruction are independent of that post-filter.
+The reconstruction is the filtered picture. DC reconstruction has no opt-out,
+so a decoder that skips the filter stages, either libbink2 with
+`bink2_enable_filters(b, 0)` or the pinned FFmpeg reference, shows pixels that
+differ from `recon` in DC-only blocks and around block edges, and the
+difference carries into later inter frames through the reference. This drift
+is accepted. `test_enc_inter` (`recon_matches_unfiltered_off`) pins it: the
+unfiltered decode differs from `recon` exactly when `bink2_filter_covers('j',
+stage)` holds for a stage that changes the clip.
 
 ## Validation
 
