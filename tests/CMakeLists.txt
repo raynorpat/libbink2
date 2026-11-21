@@ -24,6 +24,10 @@ add_executable(test_dsp_simd test_dsp_simd.c)
 target_link_libraries(test_dsp_simd PRIVATE ${BINK2_LINK_TARGET})
 add_test(NAME dsp_simd COMMAND test_dsp_simd)
 
+add_executable(test_filter test_filter.c)
+target_link_libraries(test_filter PRIVATE ${BINK2_LINK_TARGET})
+add_test(NAME filter COMMAND test_filter)
+
 add_executable(test_video test_video.c)
 target_link_libraries(test_video PRIVATE ${BINK2_LINK_TARGET})
 target_compile_definitions(test_video PRIVATE

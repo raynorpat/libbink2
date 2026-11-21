@@ -30,6 +30,7 @@ docs/                format notes, API and tool reference
 | `bink2_video_new.c/.h` | `KB2g`+ slice syntax (integer IDCT, LRU block types). |
 | `bink2_dsp.c/.h` | IDCTs, block put/add, motion compensation, YUV to RGB rows; scalar `*_c` references and the dispatch to SIMD. |
 | `bink2_dsp_neon.c`, `bink2_dsp_sse2.c` | NEON and SSE2 versions of the DSP routines, compiled in when the target has them. |
+| `bink2_filter.c/.h` | RAD's post-reconstruction stages: which revisions each stage covers, and the deblocking edge primitive. The frame-level passes are not wired in yet. |
 | `bink2_tables.c/.h` | Codebooks, scan orders, quantiser matrices. |
 | `bink2_audio.c/.h` | Bink Audio 2. |
 | `bink2_thread.c/.h` | The slice thread pool (POSIX or Win32 threads), CPU count, `BINK2_THREADS`. |
