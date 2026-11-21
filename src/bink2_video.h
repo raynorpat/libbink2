@@ -146,6 +146,10 @@ void bink2_video_store_motion(Bink2Video *v, const Bink2Slice *s,
 /* Class 0..3 of a block with `symbols` decoded AC coefficient symbols:
  * 3 for none, 2 for 1-3, 1 for 4-7, 0 for 8 or more. */
 unsigned bink2_video_ac_class(int symbols);
+/* The KB2f intra info word of a block with float DC `dc`. round = 1 (Y and
+ * alpha) adds RAD's single-precision 0.49999991f before truncating; chroma
+ * passes 0 and truncates. */
+unsigned bink2_video_old_intra_word(float dc, int symbols, int round);
 /* Stores the info word of block (bx, by) of the macroblock at luma (x, y)
  * in plane p; bx and by count 8x8 blocks inside the macroblock. */
 void bink2_video_set_info(Bink2Video *v, int p, int x, int y, int bx, int by,

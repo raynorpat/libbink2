@@ -268,7 +268,7 @@ static int test_deblock_bounds(void)
         CHECK(before[p] != NULL);
     }
     for (f = 0; f < 3; f++) {
-        int changed = 0;
+        int changed = 0, padding = 0;
 
         for (p = 0; p < 4; p++) {
             size_t i;
@@ -290,11 +290,16 @@ static int test_deblock_bounds(void)
                     if (y >= h16 || (f == 1 && x < 6) || (f == 2 && y < 6))
                         CHECK(same);
                     changed |= !same;
+                    /* Vertical edge x = 48 lies in the padding columns
+                     * past the 40-pixel width and is still filtered. */
+                    if (p == 0 && f == 1 && y < h16 && x >= 46 && x < 50)
+                        padding |= !same;
                 }
             }
         }
         CHECK(memcmp(v.cur[3], before[3], plane_bytes(&v, 3)) == 0);
         CHECK(changed);
+        CHECK(f != 1 || padding);
     }
     for (p = 0; p < 4; p++)
         free(before[p]);

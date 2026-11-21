@@ -446,8 +446,9 @@ static int old_decode_dc(Bink2Slice *s, Bink2Bits *bits, int is_luma, int q,
     return 0;
 }
 
-/* symbols, when not NULL, receives each block's number of decoded AC
- * value symbols, zero values included. */
+/* symbols, when not NULL, receives each block's number of AC value symbols
+ * that decode to a non-zero level. Zero-level value symbols, skip symbols
+ * and the positions a skip covers do not count. */
 static int old_decode_ac(Bink2Bits *bits, const uint8_t *scan,
                          float block[4][64], unsigned cbp, float q,
                          const float qmat[64], int symbols[4])
@@ -484,7 +485,7 @@ static int old_decode_ac(Bink2Bits *bits, const uint8_t *scan,
 
             if (val < 0)
                 return -1;
-            if (symbols != NULL)
+            if (val && symbols != NULL)
                 symbols[i]++;
             if (val) {
                 if (val >= 4) {
@@ -532,9 +533,9 @@ static int old_decode_ac(Bink2Bits *bits, const uint8_t *scan,
     return 0;
 }
 
-/* The intra info word of a block. Y and alpha round the DC with RAD's
- * single-precision bias; chroma truncates it. */
-static unsigned old_intra_word(float dc, int symbols, int round)
+/* Y and alpha round the DC with RAD's single-precision bias; chroma
+ * truncates it. */
+unsigned bink2_video_old_intra_word(float dc, int symbols, int round)
 {
     float r = dc + (round ? 0.49999991f : 0.0f);
 
@@ -580,8 +581,8 @@ static int old_decode_intra_luma(Bink2Video *v, Bink2Slice *s,
             bink2_idct_old(block[j]);
             bink2_put_block_f(dst + off, stride, block[j]);
             bink2_video_set_info(v, plane, x, y, pos & 3, pos >> 2,
-                                 old_intra_word(dc[i * 4 + j], symbols[j],
-                                                1));
+                                 bink2_video_old_intra_word(dc[i * 4 + j],
+                                                            symbols[j], 1));
         }
     }
     return 0;
@@ -622,7 +623,8 @@ static int old_decode_intra_chroma(Bink2Video *v, Bink2Slice *s,
         bink2_idct_old(block[i]);
         bink2_put_block_f(dst + off, stride, block[i]);
         bink2_video_set_info(v, plane, x, y, i & 1, i >> 1,
-                             old_intra_word(dc[i], symbols[i], 0));
+                             bink2_video_old_intra_word(dc[i], symbols[i],
+                                                        0));
     }
     return 0;
 }

@@ -637,7 +637,9 @@ static int test_edge_arrays_overrun(void)
         bink2_close(b);
         free(fixture);
 
-        /* Raw arrays of 7 and 31 flags need 40 bits; 32 are left. */
+        /* Raw arrays of 7 and 31 flags need 40 bits; 32 are left. The
+         * slice decode rejected this frame before the arrays were checked
+         * against the packet end, so it pins the result, not that check. */
         memset(payload, 0, sizeof(payload));
         w32(payload, 0x10000UL);
         size = build_video(buf, 256, 64, 0, payload, sizeof(payload));
