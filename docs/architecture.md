@@ -40,10 +40,13 @@ A frame call flows like this:
 1. `bink2.c` reads the frame packet using the index.
 2. The packet is split into one audio chunk per track, then the video
    payload.
-3. `bink2_video_decode()` reads the frame flags and slice offsets, then runs
-   the old or new slice decoder for every slice, on the handle's thread pool
-   when the frame has more than one slice. It then checks that each slice
-   ended before the next one starts, as a serial walk would.
+3. `bink2_video_decode()` reads the frame flags, slice offsets and `0x10000`
+   edge arrays (`bink2_video_begin_frame()` and
+   `bink2_video_read_frame_edges()`, which the encoder also calls), then
+   runs the old or new slice decoder for every slice, on the handle's thread
+   pool when the frame has more than one slice. It then checks that each
+   slice ended before the next one starts, as a serial walk would, and runs
+   `bink2_video_apply_filters()`.
 4. Each enabled audio track decodes its chunk.
 
 Decoded planes are padded to 32-sample macroblock boundaries; the public

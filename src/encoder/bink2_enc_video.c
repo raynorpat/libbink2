@@ -656,10 +656,9 @@ static int encode_inter_slice(Bink2BitWriter *bw, Bink2Video *v,
     return 0;
 }
 
-static void frame_header(Bink2BitWriter *bw, int keyframe, int height,
-                         int slices)
+static void frame_header(Bink2BitWriter *bw, unsigned long flags,
+                         int keyframe, int height, int slices)
 {
-    unsigned long flags = keyframe ? FRAME_FLAGS_INTRA : FRAME_FLAGS_INTER;
     int row_size;
     int s;
 
@@ -678,17 +677,24 @@ int bink2_enc_encode_frame(Bink2BitWriter *bw, Bink2Frame *frame,
                            const int *heights, int keyframe, int range,
                            int four_mv, Bink2EncStats *stats)
 {
+    unsigned long flags = keyframe ? FRAME_FLAGS_INTRA : FRAME_FLAGS_INTER;
     unsigned long offsets[8] = { 0 };
     Bink2Frame ref_view;
+    Bink2Bits header;
     int s;
 
-    v->frame_flags = keyframe ? FRAME_FLAGS_INTRA : FRAME_FLAGS_INTER;
-    /* Mirror what the decoder reads from the frame header: a keyframe
-     * disables every horizontal edge (see frame_header). */
-    memset(v->row_flags, 0, (size_t)v->row_size + 1);
-    memset(v->col_flags, 0, (size_t)v->col_size + 1);
-    if (keyframe)
-        memset(v->row_flags + 1, 1, (size_t)v->row_size);
+    /* The decoder's per-frame setup, then its reader on the header just
+     * written, so the edge flags the filters read are the ones in the
+     * stream. */
+    bink2_video_begin_frame(v, flags);
+    frame_header(bw, flags, keyframe, frame->height, slices);
+    if (bink2_bw_failed(bw))
+        return -1;
+    bink2_bits_init(&header, bink2_bw_data(bw), bink2_bw_bytes(bw));
+    bink2_bits_skip(&header, 32 * slices);
+    if (bink2_video_read_frame_edges(v, &header, bink2_bw_bytes(bw)) != 0 ||
+        header.bitpos != bink2_bw_bitpos(bw))
+        return -1;
     ref_view.y = v->ref[0];
     ref_view.u = v->ref[1];
     ref_view.v = v->ref[2];
@@ -698,7 +704,6 @@ int bink2_enc_encode_frame(Bink2BitWriter *bw, Bink2Frame *frame,
     ref_view.width = frame->width;
     ref_view.height = frame->height;
 
-    frame_header(bw, keyframe, frame->height, slices);
     for (s = 0; s < slices; s++) {
         int y0 = s == 0 ? 0 : heights[s - 1];
         int y1 = heights[s];

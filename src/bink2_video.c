@@ -96,6 +96,34 @@ int bink2_video_read_edge_flags(Bink2Bits *bits, unsigned char *flags,
     return 0;
 }
 
+void bink2_video_begin_frame(Bink2Video *v, unsigned long frame_flags)
+{
+    v->frame_flags = frame_flags;
+    memset(v->mv[0], 0, v->mv_capacity * sizeof(int16_t));
+    memset(v->mv[1], 0, v->mv_capacity * sizeof(int16_t));
+    memset(v->mv_count, 0, v->mv_capacity);
+    memset(v->row_flags, 0, (size_t)v->row_size + 1);
+    memset(v->col_flags, 0, (size_t)v->col_size + 1);
+}
+
+int bink2_video_read_frame_edges(Bink2Video *v, Bink2Bits *bits,
+                                 size_t real_size)
+{
+    unsigned long frame_flags = v->frame_flags;
+
+    if (!(frame_flags & 0x10000))
+        return 0;
+    if (!(frame_flags & 0x8000) &&
+        bink2_video_read_edge_flags(bits, v->row_flags, v->row_size) != 0)
+        return -1;
+    if (!(frame_flags & 0x4000) &&
+        bink2_video_read_edge_flags(bits, v->col_flags, v->col_size) != 0)
+        return -1;
+    if (bits->bitpos > real_size * 8)
+        return -1;
+    return 0;
+}
+
 unsigned bink2_video_ac_class(int symbols)
 {
     if (symbols <= 0)
@@ -439,11 +467,8 @@ static int decode_impl(Bink2Video *v, const unsigned char *data,
     }
 
     frame_flags = le32(data);
-    v->frame_flags = frame_flags;
     v->rgb_valid = 0;
-    memset(v->mv[0], 0, v->mv_capacity * sizeof(int16_t));
-    memset(v->mv[1], 0, v->mv_capacity * sizeof(int16_t));
-    memset(v->mv_count, 0, v->mv_capacity);
+    bink2_video_begin_frame(v, frame_flags);
 
     bink2_bits_init(&bits, data, padded_size);
     bink2_bits_skip(&bits, 32);
@@ -454,20 +479,8 @@ static int decode_impl(Bink2Video *v, const unsigned char *data,
         return BINK2_ERROR;
 
     bink2_bits_skip(&bits, 32 * (num_slices - 1));
-    memset(v->row_flags, 0, (size_t)v->row_size + 1);
-    memset(v->col_flags, 0, (size_t)v->col_size + 1);
-    if (frame_flags & 0x10000) {
-        if (!(frame_flags & 0x8000) &&
-            bink2_video_read_edge_flags(&bits, v->row_flags,
-                                        v->row_size) != 0)
-            return BINK2_ERROR;
-        if (!(frame_flags & 0x4000) &&
-            bink2_video_read_edge_flags(&bits, v->col_flags,
-                                        v->col_size) != 0)
-            return BINK2_ERROR;
-        if (bits.bitpos > real_size * 8)
-            return BINK2_ERROR;
-    }
+    if (bink2_video_read_frame_edges(v, &bits, real_size) != 0)
+        return BINK2_ERROR;
 
     /* Every slice start is known up front: slice 0 follows the header,
      * the others are at their stored offsets. Reject what the serial walk

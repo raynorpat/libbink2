@@ -164,6 +164,16 @@ void bink2_video_clear_info(Bink2Video *v, int x, int y);
  * left. */
 int bink2_video_read_edge_flags(Bink2Bits *bits, unsigned char *flags,
                                 int size);
+/* Starts a frame whose header word is frame_flags: stores it, zeroes the
+ * motion vectors (skip and intra macroblocks keep 0) and clears row_flags
+ * and col_flags. The decoder and the encoder both call it per frame. */
+void bink2_video_begin_frame(Bink2Video *v, unsigned long frame_flags);
+/* Reads the frame's 0x10000 edge arrays into row_flags and col_flags, per
+ * the flags begin_frame stored. bits must be at the first bit after the
+ * slice offsets; real_size is the packet size in bytes. Returns -1 when the
+ * arrays are malformed or end past the packet. */
+int bink2_video_read_frame_edges(Bink2Video *v, Bink2Bits *bits,
+                                 size_t real_size);
 /* Runs the post-reconstruction stages libbink2 covers for this revision on
  * the decoded frame in cur, when filters_on is set. */
 void bink2_video_apply_filters(Bink2Video *v);

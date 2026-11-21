@@ -110,13 +110,20 @@ For every encoded frame the encoder reconstructs with the same dequantise,
 integer IDCT, put/add, and motion-compensation functions the decoder uses,
 and then runs the decoder's own filter stages (`bink2_video_apply_filters`:
 DC reconstruction, then deblocking) on the result before it writes the recon
-and copies the picture into the reference. The encoder also records the
-per-block info words and the header edge flags the decoder derives, so the
-filters see the same inputs. `recon_path` therefore matches the decoder's
-visible planes exactly with the filters on (the default); the tests compare
-every frame byte for byte. Motion search, mode decisions, and rate control
-may be lossy, but they never make the decoder disagree with the
-reconstruction.
+and copies the picture into the reference. The filters see the decoder's
+inputs because the encoder sets them up with decoder code:
+
+- each frame starts with `bink2_video_begin_frame`, which stores the frame
+  flags and zeroes the motion vectors, so skip macroblocks have zero
+  vectors as they do in the decoder;
+- the edge flags come from `bink2_video_read_frame_edges` reading the frame
+  header the encoder has just written;
+- the per-block info words are stored with the decoder's helpers.
+
+`recon_path` therefore matches the decoder's visible planes exactly with the
+filters on (the default); the tests compare every frame byte for byte.
+Motion search, mode decisions, and rate control may be lossy, but they never
+make the decoder disagree with the reconstruction.
 
 ## Known divergence
 

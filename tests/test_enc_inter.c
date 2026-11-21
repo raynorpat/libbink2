@@ -2,6 +2,8 @@
 #include "bink2_encoder.h"
 #include "bink2_enc_internal.h"
 #include "bink2_enc_motion.h"
+#include "bink2_enc_video.h"
+#include "bink2_bits.h"
 #include "bink2_filter.h"
 
 #include "test_common.h"
@@ -124,6 +126,130 @@ static int has_nonzero_motion(bink2 b)
     return 0;
 }
 
+#define STATE_W 96
+#define STATE_H 64
+#define STATE_FRAMES 3
+
+/* Frame 1 moves frame 0 right by 8 pixels; frame 2 repeats frame 1, so its
+ * macroblocks are skips where frame 1 had motion vectors. */
+static void state_source(Bink2Frame *frame, int f)
+{
+    int shift = f == 0 ? 0 : 8;
+    int x, y;
+
+    for (y = 0; y < STATE_H; y++)
+        for (x = 0; x < STATE_W; x++) {
+            int sx = x - shift < 0 ? 0 : x - shift;
+
+            frame->y[y * frame->stride[0] + x] =
+                (unsigned char)((sx * 5 + y * 3 + ((sx ^ y) & 7) * 9) & 0xFF);
+        }
+    for (y = 0; y < (STATE_H + 1) / 2; y++)
+        for (x = 0; x < (STATE_W + 1) / 2; x++) {
+            frame->u[y * frame->stride[1] + x] = (unsigned char)(128 + x);
+            frame->v[y * frame->stride[2] + x] = (unsigned char)(128 - y);
+        }
+}
+
+static int same_state(const Bink2Video *enc, const Bink2Video *dec)
+{
+    int p, r;
+
+    CHECK(enc->frame_flags == dec->frame_flags);
+    CHECK(memcmp(enc->row_flags, dec->row_flags,
+                 (size_t)dec->row_size + 1) == 0);
+    CHECK(memcmp(enc->col_flags, dec->col_flags,
+                 (size_t)dec->col_size + 1) == 0);
+    CHECK(memcmp(enc->mv[0], dec->mv[0],
+                 dec->mv_capacity * sizeof(int16_t)) == 0);
+    CHECK(memcmp(enc->mv[1], dec->mv[1],
+                 dec->mv_capacity * sizeof(int16_t)) == 0);
+    CHECK(memcmp(enc->mv_count, dec->mv_count, dec->mv_capacity) == 0);
+    for (p = 0; p < 3; p++) {
+        int rows = dec->mb_h * (p == 0 ? 4 : 2);
+        int h = p == 0 ? (int)dec->aligned_h : (int)dec->aligned_h / 2;
+
+        CHECK(memcmp(enc->blk_info[p], dec->blk_info[p],
+                     (size_t)dec->blk_stride[p] * rows *
+                         sizeof(uint16_t)) == 0);
+        for (r = 0; r < h; r++)
+            CHECK(memcmp(enc->cur[p] + (size_t)r * enc->stride[p],
+                         dec->cur[p] + (size_t)r * dec->stride[p],
+                         (size_t)dec->stride[p]) == 0);
+    }
+    return 0;
+}
+
+static int same_planes(const Bink2Video *a, const Bink2Video *b)
+{
+    int p;
+
+    for (p = 0; p < 3; p++) {
+        unsigned long h = p == 0 ? a->aligned_h : a->aligned_h / 2;
+
+        CHECK(memcmp(a->cur[p], b->cur[p], (size_t)a->stride[p] * h) == 0);
+    }
+    return 0;
+}
+
+/* After each frame, the state the filter stages read (frame flags, edge
+ * flags, motion vectors, info words) and the picture must be the
+ * decoder's for the same payload. Frame 2's skips catch vectors left over
+ * from frame 1.
+ *
+ * The frame flags the encoder writes also leave deblocking and the residual
+ * edge filter nothing to do: R selects no direction, and a second decoder
+ * with the filters off, followed by DC reconstruction alone, gives the same
+ * picture as the filtered decode (DB would run after DC). */
+static int test_state_matches_decoder(void)
+{
+    Bink2Video enc, dec, dc_only;
+    Bink2Frame frame;
+    Bink2EncStats stats;
+    int heights[8];
+    int slices, f, moved = 0;
+
+    CHECK(bink2_video_init(&enc, STATE_W, STATE_H, 0x10, 'j') == 0);
+    CHECK(bink2_video_init(&dec, STATE_W, STATE_H, 0x10, 'j') == 0);
+    CHECK(bink2_video_init(&dc_only, STATE_W, STATE_H, 0x10, 'j') == 0);
+    dc_only.filters_on = 0;
+    slices = bink2_video_slice_heights('j', 0x10, STATE_H, heights);
+    CHECK(slices >= 1);
+    CHECK(bink2_frame_alloc(&frame, STATE_W, STATE_H) == 0);
+    for (f = 0; f < STATE_FRAMES; f++) {
+        Bink2BitWriter bw;
+        size_t i;
+
+        state_source(&frame, f);
+        memset(&stats, 0, sizeof(stats));
+        bink2_enc_reset_frame(&enc);
+        bink2_bw_init(&bw);
+        CHECK(bink2_enc_encode_frame(&bw, &frame, &enc, 12, slices, heights,
+                                     f == 0, 8, 1, &stats) == 0);
+        CHECK(bink2_video_decode(&dec, bink2_bw_data(&bw),
+                                 bink2_bw_bytes(&bw), f == 0) == 0);
+        CHECK(bink2_video_decode(&dc_only, bink2_bw_data(&bw),
+                                 bink2_bw_bytes(&bw), f == 0) == 0);
+        bink2_bw_free(&bw);
+        CHECK(same_state(&enc, &dec) == 0);
+        CHECK(bink2_filter_residual_dirs(&dec) == 0);
+        bink2_filter_dcrecon(&dc_only);
+        CHECK(same_planes(&dc_only, &dec) == 0);
+        if (f == 1)
+            for (i = 0; i < dec.mv_capacity; i++)
+                if (dec.mv[0][i] != 0 || dec.mv[1][i] != 0)
+                    moved = 1;
+        if (f == 2)
+            CHECK(stats.skip > 0);
+    }
+    CHECK(moved);
+    bink2_frame_free(&frame);
+    bink2_video_uninit(&enc);
+    bink2_video_uninit(&dec);
+    bink2_video_uninit(&dc_only);
+    return 0;
+}
+
 int main(void)
 {
     bink2_enc_source src;
@@ -141,6 +267,7 @@ int main(void)
     bink2 b;
 
     CHECK(test_mv_inversion() == 0);
+    CHECK(test_state_matches_decoder() == 0);
 
     memset(&src, 0, sizeof(src));
     src.width = TEST_WIDTH;
