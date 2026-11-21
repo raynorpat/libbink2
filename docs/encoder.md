@@ -127,16 +127,24 @@ make the decoder disagree with the reconstruction.
 
 ## Known divergence
 
-The reconstruction is the filtered picture. DC reconstruction has no frame-flag opt-out,
-so a decoder that skips the filter stages, either libbink2 with
-`bink2_enable_filters(b, 0)` or the pinned FFmpeg reference, shows pixels that
-differ from `recon` in DC-only blocks, and the
-difference carries into later inter frames through the reference. This drift
-is accepted. With the frame flags and edge arrays the encoder writes,
+The reconstruction is the filtered picture. DC reconstruction has no
+frame-flag opt-out, so a decoder that skips the filter stages, either
+libbink2 with `bink2_enable_filters(b, 0)` or the pinned FFmpeg reference,
+shows pixels that differ from `recon` in DC-only blocks, and the difference
+carries into later inter frames through the reference. This drift is
+accepted. With the frame flags and edge arrays the encoder writes,
 deblocking and the residual edge filter change no pixels in its `KB2j`
-output; only DC reconstruction does. `test_enc_inter`
-(`recon_matches_unfiltered_off`) pins it: the unfiltered decode differs from `recon` exactly when `bink2_filter_covers('j',
-stage)` holds for a stage that changes the clip.
+output; only DC reconstruction does.
+
+`test_enc_inter` checks both halves. `test_state_matches_decoder` encodes a
+short clip with the internal API, decodes each payload, and requires the
+encoder's frame flags, edge flags, motion vectors, info words and picture
+to equal the decoder's. On each frame it also requires that the residual
+edge filter selects no direction, and that a filters-off decode followed by
+DC reconstruction alone gives the filtered picture, so deblocking changed
+nothing. The end of `main` decodes the encoded file with the filters off
+and requires its keyframe, which has DC-only blocks in a flat band, to
+differ from `recon`.
 
 ## Validation
 
@@ -144,7 +152,8 @@ stage)` holds for a stage that changes the clip.
 `-v error` and fails on any diagnostic. The pinned oracle has a
 `slice_height[4]` array bug in its 8-slice path, so it rejects valid 8-slice
 files; the script exits 77 (the project's skip code) for those and the
-library's own decoder round trip covers them. Set `FFMPEG_BINK2` to point at a different build. Set
+library's own decoder round trip covers them. Set `FFMPEG_BINK2` to point
+at a different build. Set
 `BINK2ENC_BIN` and `BINK2_VALIDATE_YUV` (plus optional
 `BINK2_VALIDATE_WIDTH/HEIGHT/FPS`) to also encode the same raw clip with the
 independent `bink2enc` and print both file sizes.

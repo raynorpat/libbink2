@@ -328,15 +328,15 @@ int main(void)
     fclose(file);
     bink2_close(b);
 
-    /* Decoding with the filters off must differ from recon exactly when
-     * KB2j is covered by a stage that changes this clip. DC reconstruction
-     * has no opt-out, so the stage list includes it and the clip has DC-only
-     * blocks in the flat band. */
+    /* The encoder writes KB2j, which DC reconstruction covers, and the flat
+     * band gives the keyframe DC-only blocks, so a decode with the filters
+     * off must differ from recon in the keyframe. test_state_matches_decoder
+     * shows the frame flags leave deblocking and R nothing to do, so DC
+     * reconstruction is the cause. */
     {
-        int covered = bink2_filter_covers('j', BINK2_STAGE_DEBLOCK) ||
-                      bink2_filter_covers('j', BINK2_STAGE_DCRECON);
-        int differs = 0;
+        int differs[TEST_FRAMES];
 
+        CHECK(bink2_filter_covers('j', BINK2_STAGE_DCRECON) == 1);
         b = bink2_open_file("test_enc_inter.bk2", BINK2_MODE_DISK);
         CHECK(b != NULL);
         CHECK(bink2_enable_video(b, 1) == 0);
@@ -348,14 +348,16 @@ int main(void)
 
             CHECK(status != BINK2_ERROR);
             CHECK(fread(ref, 1, y_size, file) == y_size);
-            if (check_plane_quiet(b, 0, ref, TEST_WIDTH, TEST_HEIGHT))
-                differs = 1;
-            CHECK(fread(ref, 1, c_size * 2, file) == c_size * 2);
+            differs[f] = check_plane_quiet(b, 0, ref, TEST_WIDTH,
+                                           TEST_HEIGHT);
+            CHECK(fread(ref, 1, c_size, file) == c_size);
+            differs[f] |= check_plane_quiet(b, 1, ref, cw, ch);
+            CHECK(fread(ref, 1, c_size, file) == c_size);
+            differs[f] |= check_plane_quiet(b, 2, ref, cw, ch);
         }
         fclose(file);
         bink2_close(b);
-        CHECK(covered == 1);
-        CHECK(differs == covered);
+        CHECK(differs[0] == 1);
     }
     free(ref);
 
