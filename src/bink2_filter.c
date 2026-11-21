@@ -259,3 +259,340 @@ void bink2_filter_residual(int16_t *res, int stride, int n,
                                            words[(by - 1) * n + bx],
                                            words[by * n + bx]);
 }
+
+/* ---- Stage DC ---- */
+
+enum { N_UL, N_U, N_UR, N_L, N_C, N_R, N_DL, N_D, N_DR };
+
+/* floor(v * k / 65536). */
+static int mul_high(int v, int k)
+{
+    return floor_div(v * k, 65536);
+}
+
+/* The left part Lw(j, d) of the integer weights at position j = 0..7.
+ * The right part Rw(j, d) is the mirror image, Lw(7 - j, d). */
+static int dc_weight(int j, int d)
+{
+    switch (j) {
+    case 0: return mul_high(d, 0x6800);
+    case 1: return mul_high(d, 0x4800);
+    case 2: return mul_high(d, 0x3000);
+    case 3: return mul_high(d, 0x1C00);
+    case 4: return floor_div(d, 16);
+    case 5: return floor_div(d, 32);
+    case 6: return floor_div(d, 128);
+    default: return 0;
+    }
+}
+
+/* One weighted term of the float form: the substituted DC of neighbour n
+ * times w. */
+typedef struct {
+    unsigned char n;
+    float w;
+} Bink2DcTerm;
+
+typedef struct {
+    int count;
+    Bink2DcTerm term[8];
+} Bink2DcPixel;
+
+/* KB2f weights per pixel, row by row, each in summation order. */
+static const Bink2DcPixel dc_float_weights[64] = {
+    /* row 0 */
+    { 4, { { N_UL, 0.0241113249f }, { N_L, 0.0308280513f },
+           { N_U, 0.0308280513f }, { N_C, 0.0392670147f } } },
+    { 4, { { N_UL, 0.0175668225f }, { N_L, 0.0225957558f },
+           { N_U, 0.0373725556f }, { N_C, 0.0474993102f } } },
+    { 4, { { N_UL, 0.0115389917f }, { N_L, 0.0149834668f },
+           { N_U, 0.0434003845f }, { N_C, 0.0551116019f } } },
+    { 6, { { N_UL, 0.00637227902f }, { N_L, 0.00840451941f },
+           { N_U, 0.0461559668f }, { N_C, 0.0584182963f },
+           { N_UR, 0.00241113245f }, { N_R, 0.00327225123f } } },
+    { 6, { { N_UL, 0.00241113245f }, { N_L, 0.00327225123f },
+           { N_U, 0.0461559668f }, { N_C, 0.0584182963f },
+           { N_UR, 0.00637227902f }, { N_R, 0.00840451941f } } },
+    { 4, { { N_U, 0.0434003845f }, { N_C, 0.0551116019f },
+           { N_UR, 0.0115389917f }, { N_R, 0.0149834668f } } },
+    { 4, { { N_U, 0.0373725556f }, { N_C, 0.0474993102f },
+           { N_UR, 0.0175668225f }, { N_R, 0.0225957558f } } },
+    { 4, { { N_U, 0.0308280513f }, { N_C, 0.0392670147f },
+           { N_UR, 0.0241113249f }, { N_R, 0.0308280513f } } },
+    /* row 1 */
+    { 4, { { N_UL, 0.0175668225f }, { N_L, 0.0373725556f },
+           { N_U, 0.0225957558f }, { N_C, 0.0474993102f } } },
+    { 4, { { N_UL, 0.0126756681f }, { N_L, 0.027486911f },
+           { N_U, 0.027486911f }, { N_C, 0.0573849566f } } },
+    { 4, { { N_UL, 0.00819785055f }, { N_L, 0.018324608f },
+           { N_U, 0.0319647305f }, { N_C, 0.0665472597f } } },
+    { 6, { { N_UL, 0.0044089281f }, { N_L, 0.0103678703f },
+           { N_U, 0.0341691934f }, { N_C, 0.0704050735f },
+           { N_UR, 0.00158445851f }, { N_R, 0.00409892527f } } },
+    { 6, { { N_UL, 0.00158445851f }, { N_L, 0.00409892527f },
+           { N_U, 0.0341691934f }, { N_C, 0.0704050735f },
+           { N_UR, 0.0044089281f }, { N_R, 0.0103678703f } } },
+    { 4, { { N_U, 0.0319647305f }, { N_C, 0.0665472597f },
+           { N_UR, 0.00819785055f }, { N_R, 0.018324608f } } },
+    { 4, { { N_U, 0.027486911f }, { N_C, 0.0573849566f },
+           { N_UR, 0.0126756681f }, { N_R, 0.027486911f } } },
+    { 4, { { N_U, 0.0225957558f }, { N_C, 0.0474993102f },
+           { N_UR, 0.0175668225f }, { N_R, 0.0373725556f } } },
+    /* row 2 */
+    { 4, { { N_UL, 0.0115389917f }, { N_L, 0.0434003845f },
+           { N_U, 0.0149834668f }, { N_C, 0.0551116019f } } },
+    { 4, { { N_UL, 0.00819785055f }, { N_L, 0.0319647305f },
+           { N_U, 0.018324608f }, { N_C, 0.0665472597f } } },
+    { 4, { { N_UL, 0.00516671268f }, { N_L, 0.0213557463f },
+           { N_U, 0.0213557463f }, { N_C, 0.0771562383f } } },
+    { 6, { { N_UL, 0.00265224581f }, { N_L, 0.0121245524f },
+           { N_U, 0.0230090935f }, { N_C, 0.0815651715f },
+           { N_UR, 0.00086111878f }, { N_R, 0.00482226489f } } },
+    { 6, { { N_UL, 0.00086111878f }, { N_L, 0.00482226489f },
+           { N_U, 0.0230090935f }, { N_C, 0.0815651715f },
+           { N_UR, 0.00265224581f }, { N_R, 0.0121245524f } } },
+    { 4, { { N_U, 0.0213557463f }, { N_C, 0.0771562383f },
+           { N_UR, 0.00516671268f }, { N_R, 0.0213557463f } } },
+    { 4, { { N_U, 0.018324608f }, { N_C, 0.0665472597f },
+           { N_UR, 0.00819785055f }, { N_R, 0.0319647305f } } },
+    { 4, { { N_U, 0.0149834668f }, { N_C, 0.0551116019f },
+           { N_UR, 0.0115389917f }, { N_R, 0.0434003845f } } },
+    /* row 3 */
+    { 6, { { N_UL, 0.00637227902f }, { N_L, 0.0461559668f },
+           { N_DL, 0.00241113245f }, { N_U, 0.00840451941f },
+           { N_C, 0.0584182963f }, { N_D, 0.00327225123f } } },
+    { 6, { { N_UL, 0.0044089281f }, { N_L, 0.0341691934f },
+           { N_DL, 0.00158445851f }, { N_U, 0.0103678703f },
+           { N_C, 0.0704050735f }, { N_D, 0.00409892527f } } },
+    { 6, { { N_UL, 0.00265224581f }, { N_L, 0.0230090935f },
+           { N_DL, 0.00086111878f }, { N_U, 0.0121245524f },
+           { N_C, 0.0815651715f }, { N_D, 0.00482226489f } } },
+    { 8, { { N_UL, 0.00124001107f }, { N_L, 0.0132267848f },
+           { N_DL, 0.000310002768f }, { N_U, 0.0132267848f },
+           { N_C, 0.0859740973f }, { N_D, 0.00537338108f },
+           { N_UR, 0.000310002768f }, { N_R, 0.00537338108f } } },
+    { 8, { { N_UL, 0.000310002768f }, { N_L, 0.00537338108f },
+           { N_U, 0.0132267848f }, { N_C, 0.0859740973f },
+           { N_D, 0.00537338108f }, { N_UR, 0.00124001107f },
+           { N_R, 0.0132267848f }, { N_DR, 0.000310002768f } } },
+    { 6, { { N_U, 0.0121245524f }, { N_C, 0.0815651715f },
+           { N_D, 0.00482226489f }, { N_UR, 0.00265224581f },
+           { N_R, 0.0230090935f }, { N_DR, 0.00086111878f } } },
+    { 6, { { N_U, 0.0103678703f }, { N_C, 0.0704050735f },
+           { N_D, 0.00409892527f }, { N_UR, 0.0044089281f },
+           { N_R, 0.0341691934f }, { N_DR, 0.00158445851f } } },
+    { 6, { { N_U, 0.00840451941f }, { N_C, 0.0584182963f },
+           { N_D, 0.00327225123f }, { N_UR, 0.00637227902f },
+           { N_R, 0.0461559668f }, { N_DR, 0.00241113245f } } },
+    /* row 4 */
+    { 6, { { N_UL, 0.00241113245f }, { N_L, 0.0461559668f },
+           { N_DL, 0.00637227902f }, { N_U, 0.00327225123f },
+           { N_C, 0.0584182963f }, { N_D, 0.00840451941f } } },
+    { 6, { { N_UL, 0.00158445851f }, { N_L, 0.0341691934f },
+           { N_DL, 0.0044089281f }, { N_U, 0.00409892527f },
+           { N_C, 0.0704050735f }, { N_D, 0.0103678703f } } },
+    { 6, { { N_UL, 0.00086111878f }, { N_L, 0.0230090935f },
+           { N_DL, 0.00265224581f }, { N_U, 0.00482226489f },
+           { N_C, 0.0815651715f }, { N_D, 0.0121245524f } } },
+    { 8, { { N_UL, 0.000310002768f }, { N_L, 0.0132267848f },
+           { N_DL, 0.00124001107f }, { N_U, 0.00537338108f },
+           { N_C, 0.0859740973f }, { N_D, 0.0132267848f },
+           { N_R, 0.00537338108f }, { N_DR, 0.000310002768f } } },
+    { 8, { { N_DL, 0.000310002768f }, { N_L, 0.00537338108f },
+           { N_U, 0.00537338108f }, { N_C, 0.0859740973f },
+           { N_D, 0.0132267848f }, { N_UR, 0.000310002768f },
+           { N_R, 0.0132267848f }, { N_DR, 0.00124001107f } } },
+    { 6, { { N_U, 0.00482226489f }, { N_C, 0.0815651715f },
+           { N_D, 0.0121245524f }, { N_UR, 0.00086111878f },
+           { N_R, 0.0230090935f }, { N_DR, 0.00265224581f } } },
+    { 6, { { N_U, 0.00409892527f }, { N_C, 0.0704050735f },
+           { N_D, 0.0103678703f }, { N_UR, 0.00158445851f },
+           { N_R, 0.0341691934f }, { N_DR, 0.0044089281f } } },
+    { 6, { { N_U, 0.00327225123f }, { N_C, 0.0584182963f },
+           { N_D, 0.00840451941f }, { N_UR, 0.00241113245f },
+           { N_R, 0.0461559668f }, { N_DR, 0.00637227902f } } },
+    /* row 5 */
+    { 4, { { N_DL, 0.0115389917f }, { N_L, 0.0434003845f },
+           { N_C, 0.0551116019f }, { N_D, 0.0149834668f } } },
+    { 4, { { N_DL, 0.00819785055f }, { N_L, 0.0319647305f },
+           { N_C, 0.0665472597f }, { N_D, 0.018324608f } } },
+    { 4, { { N_DL, 0.00516671268f }, { N_L, 0.0213557463f },
+           { N_C, 0.0771562383f }, { N_D, 0.0213557463f } } },
+    { 6, { { N_DL, 0.00265224581f }, { N_L, 0.0121245524f },
+           { N_C, 0.0815651715f }, { N_D, 0.0230090935f },
+           { N_R, 0.00482226489f }, { N_DR, 0.00086111878f } } },
+    { 6, { { N_DL, 0.00086111878f }, { N_L, 0.00482226489f },
+           { N_C, 0.0815651715f }, { N_D, 0.0230090935f },
+           { N_R, 0.0121245524f }, { N_DR, 0.00265224581f } } },
+    { 4, { { N_C, 0.0771562383f }, { N_D, 0.0213557463f },
+           { N_R, 0.0213557463f }, { N_DR, 0.00516671268f } } },
+    { 4, { { N_C, 0.0665472597f }, { N_D, 0.018324608f },
+           { N_R, 0.0319647305f }, { N_DR, 0.00819785055f } } },
+    { 4, { { N_C, 0.0551116019f }, { N_D, 0.0149834668f },
+           { N_R, 0.0434003845f }, { N_DR, 0.0115389917f } } },
+    /* row 6 */
+    { 4, { { N_DL, 0.0175668225f }, { N_L, 0.0373725556f },
+           { N_C, 0.0474993102f }, { N_D, 0.0225957558f } } },
+    { 4, { { N_DL, 0.0126756681f }, { N_L, 0.027486911f },
+           { N_C, 0.0573849566f }, { N_D, 0.027486911f } } },
+    { 4, { { N_DL, 0.00819785055f }, { N_L, 0.018324608f },
+           { N_C, 0.0665472597f }, { N_D, 0.0319647305f } } },
+    { 6, { { N_DL, 0.0044089281f }, { N_L, 0.0103678703f },
+           { N_C, 0.0704050735f }, { N_D, 0.0341691934f },
+           { N_R, 0.00409892527f }, { N_DR, 0.00158445851f } } },
+    { 6, { { N_DL, 0.00158445851f }, { N_L, 0.00409892527f },
+           { N_C, 0.0704050735f }, { N_D, 0.0341691934f },
+           { N_R, 0.0103678703f }, { N_DR, 0.0044089281f } } },
+    { 4, { { N_C, 0.0665472597f }, { N_D, 0.0319647305f },
+           { N_R, 0.018324608f }, { N_DR, 0.00819785055f } } },
+    { 4, { { N_C, 0.0573849566f }, { N_D, 0.027486911f },
+           { N_R, 0.027486911f }, { N_DR, 0.0126756681f } } },
+    { 4, { { N_C, 0.0474993102f }, { N_D, 0.0225957558f },
+           { N_R, 0.0373725556f }, { N_DR, 0.0175668225f } } },
+    /* row 7 */
+    { 4, { { N_DL, 0.0241113249f }, { N_L, 0.0308280513f },
+           { N_C, 0.0392670147f }, { N_D, 0.0308280513f } } },
+    { 4, { { N_DL, 0.0175668225f }, { N_L, 0.0225957558f },
+           { N_C, 0.0474993102f }, { N_D, 0.0373725556f } } },
+    { 4, { { N_DL, 0.0115389917f }, { N_L, 0.0149834668f },
+           { N_C, 0.0551116019f }, { N_D, 0.0434003845f } } },
+    { 6, { { N_DL, 0.00637227902f }, { N_L, 0.00840451941f },
+           { N_C, 0.0584182963f }, { N_D, 0.0461559668f },
+           { N_R, 0.00327225123f }, { N_DR, 0.00241113245f } } },
+    { 6, { { N_DL, 0.00241113245f }, { N_L, 0.00327225123f },
+           { N_C, 0.0584182963f }, { N_D, 0.0461559668f },
+           { N_R, 0.00840451941f }, { N_DR, 0.00637227902f } } },
+    { 4, { { N_C, 0.0551116019f }, { N_D, 0.0434003845f },
+           { N_R, 0.0149834668f }, { N_DR, 0.0115389917f } } },
+    { 4, { { N_C, 0.0474993102f }, { N_D, 0.0373725556f },
+           { N_R, 0.0225957558f }, { N_DR, 0.0175668225f } } },
+    { 4, { { N_C, 0.0392670147f }, { N_D, 0.0308280513f },
+           { N_R, 0.0308280513f }, { N_DR, 0.0241113249f } } },
+};
+
+static void dc_integer(unsigned char *dst, int stride, const int val[9])
+{
+    static const int row_base[3] = { N_U, N_C, N_D };
+    int h[3][8];
+    int i, j, k;
+
+    /* Horizontal pass over the rows above, through and below X. */
+    for (k = 0; k < 3; k++) {
+        int base = val[row_base[k]];
+        int dl = val[row_base[k] - 1] - base;
+        int dr = val[row_base[k] + 1] - base;
+
+        for (j = 0; j < 8; j++)
+            h[k][j] = base + 4 + dc_weight(j, dl) + dc_weight(7 - j, dr);
+    }
+    for (j = 0; j < 8; j++) {
+        int du = h[0][j] - h[1][j];
+        int dd = h[2][j] - h[1][j];
+
+        for (i = 0; i < 8; i++)
+            dst[(size_t)i * stride + j] = clamp255(floor_div(
+                h[1][j] + dc_weight(i, du) + dc_weight(7 - i, dd), 8));
+    }
+}
+
+static void dc_float(unsigned char *dst, int stride, const int val[9])
+{
+    float fv[9];
+    int i, k;
+
+    for (k = 0; k < 9; k++)
+        fv[k] = (float)val[k];
+    for (i = 0; i < 64; i++) {
+        const Bink2DcPixel *px = &dc_float_weights[i];
+        float s = fv[px->term[0].n] * px->term[0].w;
+
+        /* Every product and sum is rounded to single precision, in the
+         * table's order. */
+        for (k = 1; k < px->count; k++) {
+            float t = fv[px->term[k].n] * px->term[k].w;
+
+            s = s + t;
+        }
+        s = s + 0.49999991f;
+        dst[(size_t)(i >> 3) * stride + (i & 7)] = clamp255((int)s);
+    }
+}
+
+void bink2_filter_dc_block(unsigned char *dst, int stride,
+                           const unsigned words[9], int threshold,
+                           int integer_form)
+{
+    int x = wrap16((int)words[N_C]);
+    int use[9];
+    int dc[9];
+    int val[9];
+    int k;
+
+    for (k = 0; k < 9; k++) {
+        int d = wrap16(wrap16((int)words[k]) - x);
+
+        use[k] = threshold > (d < 0 ? -d : d);
+        dc[k] = (int)(words[k] & BINK2_INFO_DC_MASK);
+    }
+    val[N_C] = dc[N_C];
+    val[N_L] = use[N_L] ? dc[N_L] : dc[N_C];
+    val[N_R] = use[N_R] ? dc[N_R] : dc[N_C];
+    val[N_U] = use[N_U] ? dc[N_U] : dc[N_C];
+    val[N_D] = use[N_D] ? dc[N_D] : dc[N_C];
+    /* Each diagonal is tested against X and falls back to its row's side
+     * neighbour value. */
+    val[N_UL] = use[N_UL] ? dc[N_UL] : val[N_L];
+    val[N_DL] = use[N_DL] ? dc[N_DL] : val[N_L];
+    val[N_UR] = use[N_UR] ? dc[N_UR] : val[N_R];
+    val[N_DR] = use[N_DR] ? dc[N_DR] : val[N_R];
+
+    if (integer_form)
+        dc_integer(dst, stride, val);
+    else
+        dc_float(dst, stride, val);
+}
+
+void bink2_filter_dcrecon(Bink2Video *v)
+{
+    int threshold = 8 * (int)(v->frame_flags & 0xFF);
+    int integer_form = (v->frame_flags & 0x2000) != 0;
+    int h16 = (int)((v->height + 15) & ~15UL);
+    int p;
+
+    for (p = 0; p < 4; p++) {
+        int s = p == 1 || p == 2;
+        int cols = v->blk_stride[p];
+        int last = ((int)(v->aligned_h >> 3) >> s) - 1;
+        int rows = (h16 >> 3) >> s;
+        int stride = v->stride[p];
+        const uint16_t *info = v->blk_info[p];
+        int i, j, k;
+
+        if (info == NULL || v->cur[p] == NULL)
+            continue;
+        for (i = 0; i < rows; i++) {
+            /* The top block row is its own row above, and the bottom
+             * block row of the plane its own row below. */
+            const uint16_t *row[3];
+
+            row[0] = info + (size_t)(i > 0 ? i - 1 : 0) * cols;
+            row[1] = info + (size_t)i * cols;
+            row[2] = info + (size_t)(i < last ? i + 1 : last) * cols;
+            for (j = 0; j < cols; j++) {
+                unsigned words[9];
+
+                if (row[1][j] < BINK2_INFO_DC_ONLY)
+                    continue;
+                /* Outside the first and last columns a word is 0. */
+                for (k = 0; k < 9; k++) {
+                    int c = j + k % 3 - 1;
+
+                    words[k] = c < 0 || c >= cols ? 0u : row[k / 3][c];
+                }
+                bink2_filter_dc_block(v->cur[p] + (size_t)(8 * i) * stride +
+                                      8 * j, stride, words, threshold,
+                                      integer_form);
+            }
+        }
+    }
+}

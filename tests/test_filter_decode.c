@@ -340,6 +340,240 @@ static int test_uncovered_revision(void)
     return 0;
 }
 
+/* ---- stage DC over a whole frame ---- */
+
+#define WORD_DC_ONLY(dc) (BINK2_INFO_DC_ONLY | (unsigned)(dc))
+
+static int info_rows(const Bink2Video *v, int p)
+{
+    return plane_rows(v, p) / 8;
+}
+
+/* The word of block (c, r) of plane p as stage DC sees it: 0 left of the
+ * first and right of the last column; above the top row and below the
+ * bottom block row the row itself. */
+static unsigned dc_neighbour(const Bink2Video *v, int p, int c, int r)
+{
+    if (c < 0 || c >= v->blk_stride[p])
+        return 0;
+    if (r < 0)
+        r = 0;
+    if (r >= info_rows(v, p))
+        r = info_rows(v, p) - 1;
+    return v->blk_info[p][r * v->blk_stride[p] + c];
+}
+
+/* What stage DC should leave in `want` (a copy of every plane of v), built
+ * block by block from the primitive. Only block rows above the 16-aligned
+ * height are processed. */
+static void dc_expected(const Bink2Video *v, unsigned char *want[4])
+{
+    int threshold = 8 * (int)(v->frame_flags & 0xFF);
+    int integer_form = (v->frame_flags & 0x2000) != 0;
+    int p, r, c, k;
+
+    for (p = 0; p < 4; p++) {
+        int s = p == 1 || p == 2;
+        int rows = (int)((v->height + 15) & ~15UL) / 8 >> s;
+
+        if (v->blk_info[p] == NULL)
+            continue;
+        for (r = 0; r < rows; r++)
+            for (c = 0; c < v->blk_stride[p]; c++) {
+                unsigned words[9];
+
+                if (dc_neighbour(v, p, c, r) < BINK2_INFO_DC_ONLY)
+                    continue;
+                for (k = 0; k < 9; k++)
+                    words[k] = dc_neighbour(v, p, c + k % 3 - 1,
+                                            r + k / 3 - 1);
+                bink2_filter_dc_block(want[p] + (size_t)(8 * r) *
+                                      v->stride[p] + 8 * c, v->stride[p],
+                                      words, threshold, integer_form);
+            }
+    }
+}
+
+/* Random words, mostly DC-only blocks whose DCs are close enough to
+ * interpolate, over random pixels; checks every byte of every plane,
+ * padding included. 80x40 pads to 96x64 with a 16-aligned height of 48,
+ * so the last macroblock row's lower half is left alone. KB2f takes the
+ * float form and has alpha; KB2g the integer form. */
+static int test_dcrecon_frame(void)
+{
+    static const int versions[2] = { 'g', 'f' };
+    static const unsigned long flags[2] = { 0, BINK2_FLAG_ALPHA };
+    static const uint32_t frame_flags[2] = { 0x2000 | 24, 0x20 };
+    Bink2Video v;
+    unsigned char *want[4];
+    unsigned long seed = 11;
+    int t, p, i, changed;
+
+    for (t = 0; t < 2; t++) {
+        CHECK(bink2_video_init(&v, 80, 40, flags[t], versions[t]) == 0);
+        v.frame_flags = frame_flags[t];
+        changed = 0;
+        for (p = 0; p < 4; p++) {
+            size_t n;
+
+            want[p] = NULL;
+            if (v.blk_info[p] == NULL)
+                continue;
+            for (i = 0; i < info_rows(&v, p) * v.blk_stride[p]; i++) {
+                unsigned kind = (unsigned)lcg(&seed) % 8;
+                unsigned dc = 700 + (unsigned)lcg(&seed) % 300;
+
+                v.blk_info[p][i] = (uint16_t)(kind < 5 ? WORD_DC_ONLY(dc) :
+                                              kind < 6 ? 0xC000u | dc :
+                                              kind < 7 ? 0u :
+                                              WORD_DC_ONLY(dc + 1200));
+            }
+            n = plane_bytes(&v, p);
+            for (i = 0; i < (int)n; i++)
+                v.cur[p][i] = (unsigned char)lcg(&seed);
+            want[p] = (unsigned char *)malloc(n);
+            CHECK(want[p] != NULL);
+            memcpy(want[p], v.cur[p], n);
+        }
+        CHECK(v.blk_info[3] != NULL || t == 0);
+        dc_expected(&v, want);
+        for (p = 0; p < 4; p++)
+            if (want[p] != NULL)
+                changed |= memcmp(v.cur[p], want[p],
+                                  plane_bytes(&v, p)) != 0;
+        CHECK(changed);
+        bink2_filter_dcrecon(&v);
+        for (p = 0; p < 4; p++) {
+            if (want[p] == NULL)
+                continue;
+            CHECK(memcmp(v.cur[p], want[p], plane_bytes(&v, p)) == 0);
+            free(want[p]);
+        }
+        bink2_video_uninit(&v);
+    }
+    return 0;
+}
+
+/* Fills every plane with `value` and every word with `word`. */
+static void fill_all(Bink2Video *v, unsigned word, int value)
+{
+    int p;
+
+    fill_words(v, word);
+    for (p = 0; p < 4; p++)
+        if (v->cur[p] != NULL)
+            memset(v->cur[p], value, plane_bytes(v, p));
+}
+
+static int plane_is(const Bink2Video *v, int p, int value)
+{
+    size_t i;
+
+    for (i = 0; i < plane_bytes(v, p); i++)
+        CHECK(v->cur[p][i] == value);
+    return 0;
+}
+
+/* Rows 0..15 of Y (the processed rows of a 64x16 frame) are `value`, the
+ * rest 0. */
+static int luma_processed_is(const Bink2Video *v, int value)
+{
+    int x, y;
+
+    for (y = 0; y < plane_rows(v, 0); y++)
+        for (x = 0; x < v->stride[0]; x++)
+            CHECK(v->cur[0][(size_t)y * v->stride[0] + x] ==
+                  (y < 16 ? value : 0));
+    return 0;
+}
+
+/* apply_filters runs stage DC unless filters are off or the revision is
+ * uncovered; the DB flags and edge arrays never stop it. Every block is
+ * DC-only with DC 800, so DC1 gives flat 100. */
+static int test_dcrecon_gates(void)
+{
+    static const int uncovered[2] = { 'l', 'n' };
+    Bink2Video v;
+    int i;
+
+    for (i = 0; i < 2; i++) {
+        CHECK(bink2_filter_covers(uncovered[i], BINK2_STAGE_DCRECON) == 0);
+        CHECK(bink2_video_init(&v, 64, 16, 0, uncovered[i]) == 0);
+        v.frame_flags = 0x2000;
+        fill_all(&v, WORD_DC_ONLY(800), 0);
+        bink2_video_apply_filters(&v);
+        CHECK(plane_is(&v, 0, 0) == 0);
+        bink2_video_uninit(&v);
+    }
+
+    CHECK(bink2_video_init(&v, 64, 16, 0, 'g') == 0);
+    v.frame_flags = 0x2000 | 0x4000 | 0x8000 | 0x10000;
+    fill_all(&v, WORD_DC_ONLY(800), 0);
+    v.filters_on = 0;
+    bink2_video_apply_filters(&v);
+    CHECK(plane_is(&v, 0, 0) == 0);
+    v.filters_on = 1;
+    for (i = 1; i <= v.row_size; i++)
+        v.row_flags[i] = 1;
+    for (i = 1; i <= v.col_size; i++)
+        v.col_flags[i] = 1;
+    bink2_video_apply_filters(&v);
+    CHECK(luma_processed_is(&v, 100) == 0);
+    bink2_video_uninit(&v);
+
+    /* KB2f: 0x2000 clear selects the float form, which DC5 also puts at
+     * 100 for DC 800. */
+    CHECK(bink2_video_init(&v, 64, 16, 0, 'f') == 0);
+    v.frame_flags = 0;
+    fill_all(&v, WORD_DC_ONLY(800), 0);
+    bink2_video_apply_filters(&v);
+    CHECK(v.cur[0][0] == 100);
+    bink2_video_uninit(&v);
+    return 0;
+}
+
+/* DC runs before DB: a DC-only block next to a class 2 block, with a
+ * step at the edge between them. */
+static int test_dc_before_db(void)
+{
+    Bink2Video v;
+    unsigned char *start, *want;
+    size_t n;
+    int r;
+
+    CHECK(bink2_video_init(&v, 64, 16, 0, 'g') == 0);
+    v.frame_flags = 0x2000;
+    n = plane_bytes(&v, 0);
+    start = (unsigned char *)malloc(n);
+    want = (unsigned char *)malloc(n);
+    CHECK(start != NULL && want != NULL);
+    fill_words(&v, WORD_INTRA_CLASS2);
+    for (r = 0; r < 2; r++)
+        v.blk_info[0][r * v.blk_stride[0]] = (uint16_t)WORD_DC_ONLY(800);
+    fill_step(&v, 0, 8, 60, 120, 0);
+    memcpy(start, v.cur[0], n);
+
+    bink2_filter_dcrecon(&v);
+    bink2_filter_deblock(&v);
+    memcpy(want, v.cur[0], n);
+
+    memcpy(v.cur[0], start, n);
+    bink2_video_apply_filters(&v);
+    CHECK(memcmp(v.cur[0], want, n) == 0);
+    /* DB then moved the DC block's pixels next to the edge. */
+    CHECK(*luma_at(&v, 0, 7, 0) != 100);
+
+    memcpy(v.cur[0], start, n);
+    bink2_filter_deblock(&v);
+    bink2_filter_dcrecon(&v);
+    CHECK(memcmp(v.cur[0], want, n) != 0);
+
+    free(start);
+    free(want);
+    bink2_video_uninit(&v);
+    return 0;
+}
+
 /* ---- the 0x10000 row/column arrays ---- */
 
 static int parse_flags(const char *bits, int size, unsigned char *flags,
@@ -715,9 +949,10 @@ static int test_error_restores_filtered(const Blob *in)
 }
 
 /* The KB2j fixture's frame flags turn deblocking off (0x4000 plus a row
- * array of ones, or 0x4000 | 0x8000), so the stage may touch nothing:
- * every byte of every plane, padding included, matches the unfiltered
- * decode. */
+ * array of ones, or 0x4000 | 0x8000), so DB may touch nothing: every byte
+ * of every plane, padding included, matches an unfiltered decode that
+ * runs only stage DC after each frame. Stage DC is in-loop, so its output
+ * is that decode's next reference too. */
 static int test_border_planes_bounded(void)
 {
     Blob in;
@@ -735,6 +970,7 @@ static int test_border_planes_bounded(void)
         for (i = 0; i < 2; i++)
             CHECK((f == 0 ? bink2_first(b[i]) : bink2_next(b[i])) !=
                   BINK2_ERROR);
+        bink2_filter_dcrecon(b[1]->video);
         for (p = 0; p < 3; p++) {
             const Bink2Video *v = b[0]->video;
 
@@ -757,6 +993,9 @@ int main(void)
     CHECK(test_horizontal_rules() == 0);
     CHECK(test_deblock_bounds() == 0);
     CHECK(test_uncovered_revision() == 0);
+    CHECK(test_dcrecon_frame() == 0);
+    CHECK(test_dcrecon_gates() == 0);
+    CHECK(test_dc_before_db() == 0);
     CHECK(test_edge_flags() == 0);
     CHECK(test_fixture_arrays() == 0);
     CHECK(test_border_planes_bounded() == 0);

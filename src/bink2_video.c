@@ -529,6 +529,9 @@ void bink2_video_apply_filters(Bink2Video *v)
 {
     if (!v->filters_on)
         return;
+    /* DC rewrites DC-only blocks before DB filters across their edges. */
+    if (bink2_filter_covers(v->version, BINK2_STAGE_DCRECON))
+        bink2_filter_dcrecon(v);
     if (bink2_filter_covers(v->version, BINK2_STAGE_DEBLOCK))
         bink2_filter_deblock(v);
 }

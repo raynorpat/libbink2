@@ -48,6 +48,23 @@ struct Bink2Video;
  * Rows from the 16-aligned height on and the alpha plane are not touched. */
 void bink2_filter_deblock(struct Bink2Video *v);
 
+/* ---- Stage DC: reconstruction of DC-only intra blocks ---- */
+
+/* Rewrites one DC-only 8x8 block at dst as a surface interpolated from the
+ * DCs of its 3x3 neighbourhood of info words, words[] = UL U UR / L X R /
+ * DL D DR, X the block itself. A neighbour is used only when
+ * threshold > |N - X| with both words read as int16; threshold is
+ * 8 * (frame flags & 0xFF). integer_form selects the integer arithmetic of
+ * frame flag 0x2000; 0 selects KB2f's single-precision form. */
+void bink2_filter_dc_block(unsigned char *dst, int stride,
+                           const unsigned words[9], int threshold,
+                           int integer_form);
+
+/* Runs the primitive over every DC-only block of Y, U, V and alpha of the
+ * frame in cur, from its block info words and frame flags. Rows from the
+ * 16-aligned height on are not touched. */
+void bink2_filter_dcrecon(struct Bink2Video *v);
+
 /* ---- Stage R: the residual edge filter of motion+residual macroblocks ---- */
 
 #define BINK2_RES_VERTICAL   1u

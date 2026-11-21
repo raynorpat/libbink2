@@ -457,6 +457,177 @@ static int covers_matches_notes(void)
     return 0;
 }
 
+/* ---- Stage DC: DC-only intra block reconstruction ---- */
+
+#define DC_STRIDE 12
+#define DC_ORIGIN (2 * DC_STRIDE + 2)
+
+/* The info word of a DC-only intra block with DC `dc`. */
+#define DC_ONLY(dc) (BINK2_INFO_DC_ONLY | (unsigned)(dc))
+
+/* Runs the primitive on an 8x8 block at (2, 2) of a 12x12 buffer and
+ * checks that nothing outside the block was written. words[] is
+ * UL U UR / L X R / DL D DR; 0 is an inter block, never usable. */
+static int dc_run(const unsigned words[9], int threshold, int integer_form,
+                  unsigned char out[64])
+{
+    unsigned char buf[DC_STRIDE * DC_STRIDE];
+    int x, y;
+
+    memset(buf, SENTINEL, sizeof(buf));
+    bink2_filter_dc_block(buf + DC_ORIGIN, DC_STRIDE, words, threshold,
+                          integer_form);
+    for (y = 0; y < DC_STRIDE; y++)
+        for (x = 0; x < DC_STRIDE; x++) {
+            int inside = x >= 2 && x < 10 && y >= 2 && y < 10;
+
+            if (inside)
+                out[(y - 2) * 8 + (x - 2)] = buf[y * DC_STRIDE + x];
+            else
+                CHECK(buf[y * DC_STRIDE + x] == SENTINEL);
+        }
+    return 0;
+}
+
+static int dc_flat(const unsigned char out[64], int value)
+{
+    int i;
+
+    for (i = 0; i < 64; i++)
+        CHECK(out[i] == value);
+    return 0;
+}
+
+/* DC1: flat, with threshold 0 or no usable neighbours. */
+static int dcrecon_example_1(void)
+{
+    unsigned words[9] = { 0 };
+    unsigned char out[64];
+
+    words[4] = DC_ONLY(800);
+    CHECK(dc_run(words, 0, 1, out) == 0);
+    CHECK(dc_flat(out, 100) == 0);
+    CHECK(dc_run(words, 192, 1, out) == 0);
+    CHECK(dc_flat(out, 100) == 0);
+    words[4] = DC_ONLY(804);
+    CHECK(dc_run(words, 0, 1, out) == 0);
+    CHECK(dc_flat(out, 101) == 0);
+    return 0;
+}
+
+/* DC2: 2047 gives 256, clamped to 255, in both forms. */
+static int dcrecon_example_2(void)
+{
+    unsigned words[9] = { 0 };
+    unsigned char out[64];
+
+    words[4] = DC_ONLY(2047);
+    CHECK(dc_run(words, 0, 1, out) == 0);
+    CHECK(dc_flat(out, 255) == 0);
+    CHECK(dc_run(words, 0, 0, out) == 0);
+    CHECK(out[0] == 255);
+    return 0;
+}
+
+/* DC3: L = 720 and R = 880 usable at T = 192; U, D and the diagonals are
+ * not. Every row is the same horizontal ramp. */
+static int dcrecon_example_3(void)
+{
+    static const unsigned char row[8] = {
+        96, 97, 98, 100, 100, 102, 103, 104
+    };
+    unsigned words[9] = { 0 };
+    unsigned char out[64];
+    int i;
+
+    words[3] = DC_ONLY(720);
+    words[4] = DC_ONLY(800);
+    words[5] = DC_ONLY(880);
+    CHECK(dc_run(words, 192, 1, out) == 0);
+    for (i = 0; i < 8; i++)
+        CHECK(memcmp(out + 8 * i, row, 8) == 0);
+    return 0;
+}
+
+/* DC4: U = 880 and D = 720 usable; L, R and the diagonals are not. */
+static int dcrecon_example_4(void)
+{
+    static const unsigned char col0[8] = {
+        102, 102, 101, 100, 100, 99, 98, 98
+    };
+    static const unsigned char col3[8] = {
+        103, 102, 101, 100, 100, 99, 98, 97
+    };
+    unsigned words[9] = { 0 };
+    unsigned char out[64];
+    int i;
+
+    words[1] = DC_ONLY(880);
+    words[4] = DC_ONLY(800);
+    words[7] = DC_ONLY(720);
+    CHECK(dc_run(words, 192, 1, out) == 0);
+    for (i = 0; i < 8; i++) {
+        CHECK(out[8 * i] == col0[i]);
+        CHECK(out[8 * i + 3] == col3[i]);
+    }
+    return 0;
+}
+
+/* DC5: the float form, flat. */
+static int dcrecon_example_5(void)
+{
+    static const int dc[3] = { 800, 804, 4 };
+    static const int want[3] = { 100, 101, 1 };
+    const float bias = 0.49999991f;
+    unsigned words[9] = { 0 };
+    unsigned char out[64];
+    uint32_t bits;
+    int i;
+
+    /* The rounding bias the primitive adds is the float 0x3EFFFFFD. */
+    memcpy(&bits, &bias, sizeof(bits));
+    CHECK(bits == 0x3EFFFFFDu);
+    for (i = 0; i < 3; i++) {
+        words[4] = DC_ONLY(dc[i]);
+        CHECK(dc_run(words, 0, 0, out) == 0);
+        CHECK(out[0] == want[i]);
+    }
+    return 0;
+}
+
+/* DC6: the float form, with every neighbour usable: the left column 720,
+ * the right column 880, U = D = C = 800. */
+static int dcrecon_example_6(void)
+{
+    static const unsigned dc[9] = {
+        720, 800, 880, 720, 800, 880, 720, 800, 880
+    };
+    unsigned words[9];
+    unsigned char out[64];
+    int i;
+
+    for (i = 0; i < 9; i++)
+        words[i] = DC_ONLY(dc[i]);
+    CHECK(dc_run(words, 192, 0, out) == 0);
+    CHECK(out[0] == 96);
+    CHECK(out[3 * 8 + 3] == 99);
+    return 0;
+}
+
+/* DC7: DC3 with T = 64; L and R differ by 80, so the block is flat. */
+static int dcrecon_example_7(void)
+{
+    unsigned words[9] = { 0 };
+    unsigned char out[64];
+
+    words[3] = DC_ONLY(720);
+    words[4] = DC_ONLY(800);
+    words[5] = DC_ONLY(880);
+    CHECK(dc_run(words, 64, 1, out) == 0);
+    CHECK(dc_flat(out, 100) == 0);
+    return 0;
+}
+
 int main(void)
 {
     CHECK(deblock_example_1() == 0);
@@ -476,5 +647,12 @@ int main(void)
     CHECK(residual_dirs_gate() == 0);
     CHECK(residual_chroma_order() == 0);
     CHECK(residual_luma_edges() == 0);
+    CHECK(dcrecon_example_1() == 0);
+    CHECK(dcrecon_example_2() == 0);
+    CHECK(dcrecon_example_3() == 0);
+    CHECK(dcrecon_example_4() == 0);
+    CHECK(dcrecon_example_5() == 0);
+    CHECK(dcrecon_example_6() == 0);
+    CHECK(dcrecon_example_7() == 0);
     return 0;
 }
