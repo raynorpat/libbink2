@@ -178,6 +178,7 @@ static int parse_container(bink2 b, int report_alpha)
 
     b->current_frame = 0;
     b->video_enabled = 0;
+    b->filters_requested = 1;
     return 0;
 }
 
@@ -346,6 +347,14 @@ char bink2_enable_video(bink2 object, unsigned char enable)
     return 0;
 }
 
+char bink2_enable_filters(bink2 object, unsigned char enable)
+{
+    if (object == NULL)
+        return BINK2_ERROR;
+    object->filters_requested = enable ? 1 : 0;
+    return 0;
+}
+
 char bink2_enable_audio(bink2 object, unsigned char track,
                         unsigned char enable)
 {
@@ -460,6 +469,8 @@ static char decode_frame(bink2 object, unsigned long frame)
     if (object->video_enabled) {
         if (ensure_video(object) != 0)
             return BINK2_ERROR;
+        if (object->frame_keyframes[frame])
+            object->video->filters_on = object->filters_requested;
         if (bink2_video_decode(object->video, object->video_data,
                                object->video_size,
                                object->frame_keyframes[frame]) != 0)

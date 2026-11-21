@@ -34,10 +34,12 @@ static double now_seconds(void)
 static void usage(void)
 {
     fprintf(stderr,
-            "usage: bink2_bench [--iterations N] [--frames N] [--rgb] file.bk2\n"
+            "usage: bink2_bench [--iterations N] [--frames N] [--rgb]\n"
+            "                   [--no-filters] file.bk2\n"
             "  --iterations N  decode the file N times (default 5)\n"
             "  --frames N      stop each pass after N frames\n"
-            "  --rgb           also convert every frame to RGB\n");
+            "  --rgb           also convert every frame to RGB\n"
+            "  --no-filters    skip the post-reconstruction filters\n");
 }
 
 int main(int argc, char **argv)
@@ -47,6 +49,7 @@ int main(int argc, char **argv)
     unsigned long frames = 0;
     unsigned long max_frames = 0;
     int rgb = 0;
+    int no_filters = 0;
     double start, elapsed;
     unsigned long it;
     bink2 b;
@@ -71,6 +74,8 @@ int main(int argc, char **argv)
             }
         } else if (strcmp(argv[i], "--rgb") == 0) {
             rgb = 1;
+        } else if (strcmp(argv[i], "--no-filters") == 0) {
+            no_filters = 1;
         } else if (argv[i][0] == '-' || path != NULL) {
             usage();
             return 2;
@@ -89,6 +94,7 @@ int main(int argc, char **argv)
         return 1;
     }
     bink2_enable_video(b, 1);
+    bink2_enable_filters(b, (unsigned char)!no_filters);
     for (i = 0; i < 7; i++)
         bink2_enable_audio(b, (unsigned char)i, 0);
 

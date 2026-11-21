@@ -58,6 +58,7 @@ int main(int argc, char **argv)
     unsigned long width = 0;
     unsigned long height = 0;
     unsigned long decoded = 0;
+    int filters = 1;
     double usf = 0.0;
     int i;
     int status;
@@ -66,9 +67,11 @@ int main(int argc, char **argv)
     for (i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--frames") == 0 && i + 1 < argc) {
             limit = strtoul(argv[++i], NULL, 10);
+        } else if (strcmp(argv[i], "--no-filters") == 0) {
+            filters = 0;
         } else if (argv[i][0] == '-' && argv[i][1] != '\0') {
-            fprintf(stderr,
-                    "usage: bink2_dump [--frames N] file.bk2 [outdir]\n");
+            fprintf(stderr, "usage: bink2_dump [--frames N] [--no-filters] "
+                            "file.bk2 [outdir]\n");
             return 2;
         } else if (path == NULL) {
             path = argv[i];
@@ -77,7 +80,8 @@ int main(int argc, char **argv)
         }
     }
     if (path == NULL) {
-        fprintf(stderr, "usage: bink2_dump [--frames N] file.bk2 [outdir]\n");
+        fprintf(stderr, "usage: bink2_dump [--frames N] [--no-filters] "
+                        "file.bk2 [outdir]\n");
         return 2;
     }
 
@@ -96,6 +100,7 @@ int main(int argc, char **argv)
     printf("%s: %lux%lu, %lu frames, %.3f fps\n", path, width, height,
            frame_count, usf > 0.0 ? 1000000.0 / usf : 0.0);
 
+    bink2_enable_filters(b, (unsigned char)filters);
     if (bink2_enable_video(b, 1) != 0) {
         fprintf(stderr, "bink2_dump: cannot enable video\n");
         bink2_close(b);

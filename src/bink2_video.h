@@ -46,6 +46,7 @@ typedef struct Bink2Video {
     int has_alpha;
     int has_prev;
     int range;
+    int filters_on;     /* latched from bink2_enable_filters at keyframes */
 
     unsigned char *cur[4];
     unsigned char *ref[4];

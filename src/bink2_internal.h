@@ -59,6 +59,7 @@ struct bink2_t {
     /* playback state */
     unsigned long current_frame;
     unsigned char video_enabled;
+    unsigned char filters_requested;    /* latched at each keyframe */
     struct Bink2Video *video;
     int thread_limit;   /* see bink2_internal_set_threads */
 };

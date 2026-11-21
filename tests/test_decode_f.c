@@ -71,6 +71,7 @@ int main(void)
         return skip;
     CHECK(bink2_info_video(b, &w, &h, NULL) == 0);
     CHECK(bink2_enable_video(b, 1) == 0);
+    CHECK(bink2_enable_filters(b, 0) == 0);
 
     for (frame = 0; frame < 236; frame++) {
         status = frame == 0 ? bink2_first(b) : bink2_next(b);

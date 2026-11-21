@@ -120,6 +120,7 @@ int bink2_video_init(Bink2Video *v, unsigned long width, unsigned long height,
     v->flags = flags;
     v->has_alpha = (flags & BINK2_FLAG_ALPHA) ? 1 : 0;
     v->range = BINK2_RANGE_FULL;
+    v->filters_on = 1;
 
     v->stride[0] = (int)v->aligned_w;
     v->stride[1] = (int)((((width + 1) / 2) + 15) & ~15UL);

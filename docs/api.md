@@ -84,6 +84,13 @@ int play(const char *path)
 Video and audio are both **disabled** after open. A frame call decodes only
 what is enabled, so enable what you need before `bink2_first()`.
 
+`bink2_enable_filters(b, enable)` switches the decoder's post-reconstruction
+filters; they are **enabled** after open. It returns `0`, or `BINK2_ERROR`
+for a `NULL` object. The setting is latched whenever a keyframe is decoded
+(by `bink2_first()`, `bink2_seek_keyframe()`, or `bink2_next()` reaching a
+keyframe) and applies to that keyframe and the inter frames after it, so a
+change made mid-stream takes effect at the next keyframe.
+
 ### Opening and closing
 
 | Function | Notes |

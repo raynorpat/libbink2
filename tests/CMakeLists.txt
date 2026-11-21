@@ -1,5 +1,7 @@
 add_executable(test_api test_api.c)
 target_link_libraries(test_api PRIVATE ${BINK2_LINK_TARGET})
+target_compile_definitions(test_api PRIVATE
+  BINK2_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/media")
 add_test(NAME api COMMAND test_api)
 
 add_executable(test_bits test_bits.c)

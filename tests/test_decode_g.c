@@ -57,6 +57,7 @@ static int test_fixture(void)
     CHECK(b != NULL);
     CHECK(bink2_info_video(b, &w, &h, NULL) == 0);
     CHECK(bink2_enable_video(b, 1) == 0);
+    CHECK(bink2_enable_filters(b, 0) == 0);
     for (frame = 0; frame < 32; frame++) {
         status = frame == 0 ? bink2_first(b) : bink2_next(b);
         CHECK(status != BINK2_ERROR);
@@ -90,6 +91,7 @@ int main(void)
         return skip;
     CHECK(bink2_info_video(b, &w, &h, NULL) == 0);
     CHECK(bink2_enable_video(b, 1) == 0);
+    CHECK(bink2_enable_filters(b, 0) == 0);
     {
         unsigned long frame;
         unsigned long mbw = 0, mbh = 0;

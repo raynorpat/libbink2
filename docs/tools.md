@@ -90,12 +90,14 @@ The output is `KB2j` video with an optional single audio track. See
 ## bink2_dump
 
 ```
-bink2_dump [--frames N] file.bk2 [outdir]
+bink2_dump [--frames N] [--no-filters] file.bk2 [outdir]
 ```
 
 Decodes video and writes `frame_00000.ppm`, `frame_00001.ppm`, ... into
 `outdir` (default: the current directory). The directory must already exist.
-`--frames N` stops after `N` frames.
+`--frames N` stops after `N` frames. `--no-filters` calls
+`bink2_enable_filters(b, 0)`; use it when comparing with the golden values
+in `tests/reference_checksums.h`, which are captured without the filters.
 
 It prints a header line, then one line per frame with the FNV-1a hash of each
 visible plane:
@@ -116,7 +118,7 @@ line.
 ## bink2_bench
 
 ```
-bink2_bench [--iterations N] [--frames N] [--rgb] file.bk2
+bink2_bench [--iterations N] [--frames N] [--rgb] [--no-filters] file.bk2
 ```
 
 Decodes the video of `file.bk2` from the first frame `N` times (default 5)
@@ -130,7 +132,9 @@ frames=180 seconds=5.712 fps=31.5
 
 `--frames N` stops each pass after `N` frames, for files whose index lists
 frames that are missing. `--rgb` also converts every frame to RGB with
-`bink2_get_video()`, which is the cost a player pays.
+`bink2_get_video()`, which is the cost a player pays. `--no-filters`
+disables the post-reconstruction filters so the pass measures the bare
+decode.
 
 Exit codes: `0` success, `1` open or decode failure, `2` bad command line.
 

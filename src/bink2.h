@@ -87,6 +87,13 @@ char bink2_info_audio(const bink2 object, unsigned char *track_mask,
 char bink2_enable_video(bink2 object, unsigned char enable);
 char bink2_enable_audio(bink2 object, unsigned char track,
                         unsigned char enable);
+/**
+ * Apply the decoder's post-reconstruction filters (default on). The setting
+ * takes effect at the next keyframe decoded by bink2_first(),
+ * bink2_seek_keyframe() or bink2_next(), and holds until the next one.
+ * Returns 0, or BINK2_ERROR for a NULL object.
+ */
+char bink2_enable_filters(bink2 object, unsigned char enable);
 
 /* FRAME OPERATIONS */
 /** rewind to the first frame and decode it */
