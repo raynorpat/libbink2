@@ -1,6 +1,7 @@
 #include "bink2.h"
 #include "bink2_bits.h"
 #include "bink2_enc_syntax.h"
+#include "bink2_filter.h"
 #include "bink2_tables.h"
 #include "bink2_video.h"
 #include "test_common.h"
@@ -231,6 +232,165 @@ static int test_kb2g_words(void)
         CHECK(check_g_intra(&v, 1) == 0);
     }
     bink2_video_uninit(&v);
+    return 0;
+}
+
+/* ---- stage R: a KB2g motion+residual macroblock ---- */
+
+/* Luma AC symbol counts by decode index and the coded blocks; U and V
+ * likewise. Uncoded and coded-empty blocks are class 3. */
+static const int R_LUMA[16] = {
+    0, 2, 5, 9, 1, 0, 3, 8, 4, 0, 2, 7, 0, 1, 6, 3
+};
+static const uint32_t R_LUMA_CBP = 0xDF7E;
+static const int R_U[4] = { 2, 0, 9, 5 };
+static const uint32_t R_U_CBP = 0xB;
+static const int R_V[4] = { 1, 4, 0, 0 };
+static const uint32_t R_V_CBP = 0x7;
+
+static int r_pattern(int p, int x, int y)
+{
+    return 60 + (x * 7 + y * 13 + p * 29) % 131;
+}
+
+/* A 64x32 video whose previous picture is the pattern. */
+static int r_video(Bink2Video *v, int filters)
+{
+    int p, x, y;
+
+    CHECK(bink2_video_init(v, 64, 32, 0, 'g') == 0);
+    v->filters_on = filters;
+    for (p = 0; p < 3; p++)
+        for (y = 0; y < (p ? 16 : 32); y++)
+            for (x = 0; x < v->stride[p]; x++)
+                v->cur[p][(size_t)y * v->stride[p] + x] =
+                    (unsigned char)r_pattern(p, x, y);
+    v->has_prev = 1;
+    return 0;
+}
+
+static void r_put_blocks(Bink2BitWriter *bw, const int *counts, int n,
+                         uint32_t cbp, int seed)
+{
+    int32_t dcs[16], levels[64];
+    int i;
+
+    for (i = 0; i < n; i++)
+        dcs[i] = ((i * 37 + seed) % 17 - 8) * 7;
+    bink2_write_dcs(bw, dcs, n, 0);
+    for (i = 0; i < n; i++) {
+        g_levels(levels, counts[i]);
+        bink2_write_acs(bw, levels, bink2g_inter_qmat, 0, (cbp >> i) & 1);
+    }
+}
+
+/* Inter frame: motion+residual with a zero vector, then a skip. */
+static int r_frame(Bink2Video *v, uint32_t flags)
+{
+    Bink2BitWriter bw;
+    uint8_t lru[4] = { 2, 3, 1, 0 };
+    int ret;
+
+    bink2_bw_init(&bw);
+    bink2_bw_put(&bw, flags, 32);
+    bink2_write_btype(&bw, lru, 3);
+    bink2_write_mv1(&bw, 0, 0);
+    bink2_write_quant(&bw, 0, 0);
+    bink2_write_cbp_luma(&bw, 0, flags & 0x40000, R_LUMA_CBP);
+    r_put_blocks(&bw, R_LUMA, 16, R_LUMA_CBP, 3);
+    bink2_bw_put(&bw, 1, 1);                    /* chroma coded */
+    bink2_write_cbp_chroma(&bw, 0, R_U_CBP);
+    r_put_blocks(&bw, R_U, 4, R_U_CBP, 5);
+    bink2_write_cbp_chroma(&bw, 0, R_V_CBP);
+    r_put_blocks(&bw, R_V, 4, R_V_CBP, 11);
+    bink2_write_btype(&bw, lru, 1);
+    ret = decode_bw(v, &bw, 0);
+    bink2_bw_free(&bw);
+    return ret;
+}
+
+static unsigned r_word(float dc, int n)
+{
+    return spec_class(n) << 13 | ((unsigned)(int)dc & 0x1FFFu);
+}
+
+/* Plane p of macroblock 0 with filters on (a) against off (b): b minus
+ * the pattern is the unfiltered residual, which must not have clamped.
+ * Filtered with the blocks' words and added back it must give a. Every
+ * other pixel is the skip macroblock's copy of the pattern. */
+static int r_check_plane(const Bink2Video *a, const Bink2Video *b, int p,
+                         unsigned dirs, int *changed)
+{
+    int n = p ? 2 : 4;
+    int size = 8 * n;
+    int comp = p == 0 ? 0 : p == 2 ? 1 : 2;
+    const int *counts = p == 0 ? R_LUMA : p == 2 ? R_U : R_V;
+    uint32_t cbp = p == 0 ? R_LUMA_CBP : p == 2 ? R_U_CBP : R_V_CBP;
+    const float *dc = b->slice[0].dc_prev[0].dc[comp];
+    int16_t res[32 * 32];
+    unsigned words[16];
+    int stride = a->stride[p];
+    int x, y, i;
+
+    for (i = 0; i < n * n; i++) {
+        int pos = p ? i : bink2_luma_repos[i];
+        int cnt = (cbp >> i) & 1 ? counts[i] : 0;
+
+        CHECK(dc[i] == a->slice[0].dc_prev[0].dc[comp][i]);
+        words[pos] = r_word(dc[i], cnt);
+    }
+    for (y = 0; y < size; y++)
+        for (x = 0; x < size; x++) {
+            int got = b->cur[p][(size_t)y * stride + x];
+
+            CHECK(got > 0 && got < 255);
+            res[y * 32 + x] = (int16_t)(got - r_pattern(p, x, y));
+        }
+    bink2_filter_residual(res, 32, n, words, dirs);
+    for (y = 0; y < (p ? 16 : 32); y++)
+        for (x = 0; x < stride; x++) {
+            int want = r_pattern(p, x, y);
+            int got = a->cur[p][(size_t)y * stride + x];
+
+            if (x < size) {
+                want += res[y * 32 + x];
+                want = want < 0 ? 0 : want > 255 ? 255 : want;
+            }
+            CHECK(got == want);
+            *changed |= got != b->cur[p][(size_t)y * stride + x];
+        }
+    return 0;
+}
+
+static int test_kb2g_residual_filter(void)
+{
+    static const struct {
+        uint32_t flags;
+        unsigned dirs;
+    } cases[4] = {
+        { 0x2000, BINK2_RES_VERTICAL | BINK2_RES_HORIZONTAL },
+        { 0x6000, BINK2_RES_HORIZONTAL },
+        { 0xA000, BINK2_RES_VERTICAL },
+        { 0x42000, 0 },
+    };
+    int c, p;
+
+    for (c = 0; c < 4; c++) {
+        Bink2Video a, b;
+        int changed[3] = { 0, 0, 0 };
+
+        CHECK(r_video(&a, 1) == 0);
+        CHECK(r_video(&b, 0) == 0);
+        CHECK(r_frame(&a, cases[c].flags) == BINK2_OK);
+        CHECK(r_frame(&b, cases[c].flags) == BINK2_OK);
+        for (p = 0; p < 3; p++)
+            CHECK(r_check_plane(&a, &b, p, cases[c].dirs,
+                                &changed[p]) == 0);
+        for (p = 0; p < 3; p++)
+            CHECK(changed[p] == (cases[c].dirs != 0));
+        bink2_video_uninit(&a);
+        bink2_video_uninit(&b);
+    }
     return 0;
 }
 
@@ -485,5 +645,6 @@ int main(void)
     CHECK(test_kb2f_dc_rounding() == 0);
     CHECK(test_kb2g_words() == 0);
     CHECK(test_kb2f_words() == 0);
+    CHECK(test_kb2g_residual_filter() == 0);
     return 0;
 }

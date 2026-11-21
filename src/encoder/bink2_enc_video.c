@@ -3,6 +3,7 @@
 #include "bink2_enc_dct.h"
 #include "bink2_enc_motion.h"
 #include "bink2_enc_syntax.h"
+#include "bink2_filter.h"
 #include "bink2_tables.h"
 #include "bink2_video_new.h"
 
@@ -437,6 +438,8 @@ static int encode_residual_luma(Bink2BitWriter *bw, Bink2Video *v,
     int32_t desired[16];
     int32_t tdc[16];
     int dc_actual[16];
+    int32_t block[16][64];
+    unsigned words[16];
     int mb = x / 32;
     int idx;
 
@@ -466,16 +469,15 @@ static int encode_residual_luma(Bink2BitWriter *bw, Bink2Video *v,
 
     for (idx = 0; idx < 16; idx++) {
         int pos = bink2_luma_repos[idx];
-        int bx = (pos & 3) * 8;
-        int by = (pos >> 2) * 8;
-        int32_t block[64];
 
-        bink2_dequantise(levels[idx], bink2g_inter_qmat, q, block);
-        block[0] = dc_actual[idx] * 8 + 32;
-        bink2_idct_new(block);
-        bink2_add_block(v->cur[0] + (size_t)(y + by) * v->stride[0] + x +
-                        bx, v->stride[0], block);
+        bink2_dequantise(levels[idx], bink2g_inter_qmat, q, block[pos]);
+        block[pos][0] = dc_actual[idx] * 8 + 32;
+        words[pos] = bink2_filter_residual_word(
+            dc_actual[idx], bink2_new_ac_symbols(levels[idx]));
     }
+    bink2_new_add_residual(v->cur[0] + (size_t)y * v->stride[0] + x,
+                           v->stride[0], block, words, 4,
+                           bink2_filter_residual_dirs(v));
     return 0;
 }
 
@@ -491,6 +493,8 @@ static int encode_residual_chroma(Bink2BitWriter *bw, Bink2Video *v,
     int32_t desired[16] = { 0 };
     int32_t tdc[4];
     int dc_actual[4];
+    int32_t block[4][64];
+    unsigned words[4];
     int idx;
 
     for (idx = 0; idx < 4; idx++) {
@@ -516,16 +520,14 @@ static int encode_residual_chroma(Bink2BitWriter *bw, Bink2Video *v,
         bink2_write_acs(bw, levels[idx], bink2g_inter_qmat, q, 1);
 
     for (idx = 0; idx < 4; idx++) {
-        int bx = (idx & 1) * 8;
-        int by = (idx >> 1) * 8;
-        int32_t block[64];
-
-        bink2_dequantise(levels[idx], bink2g_inter_qmat, q, block);
-        block[0] = dc_actual[idx] * 8 + 32;
-        bink2_idct_new(block);
-        bink2_add_block(v->cur[plane] + (size_t)(cy + by) * v->stride[plane] +
-                        cx + bx, v->stride[plane], block);
+        bink2_dequantise(levels[idx], bink2g_inter_qmat, q, block[idx]);
+        block[idx][0] = dc_actual[idx] * 8 + 32;
+        words[idx] = bink2_filter_residual_word(
+            dc_actual[idx], bink2_new_ac_symbols(levels[idx]));
     }
+    bink2_new_add_residual(v->cur[plane] + (size_t)cy * v->stride[plane] + cx,
+                           v->stride[plane], block, words, 2,
+                           bink2_filter_residual_dirs(v));
     return 0;
 }
 

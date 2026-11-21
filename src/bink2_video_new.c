@@ -1,3 +1,4 @@
+#include "bink2_filter.h"
 #include "bink2_tables.h"
 #include "bink2_video_new.h"
 #include "bink2_video.h"
@@ -328,9 +329,17 @@ static int new_decode_dc(Bink2Slice *s, Bink2Bits *bits, int is_luma,
     return 0;
 }
 
+int bink2_new_ac_symbols(const int32_t levels[64])
+{
+    int j, n = 0;
+
+    for (j = 1; j < 64; j++)
+        n += levels[j] != 0;
+    return n;
+}
+
 /* symbols, when not NULL, receives each block's number of decoded AC
- * symbols. Every symbol is a non-zero level at its own position, so that
- * is the number of non-zero levels before dequantisation. */
+ * symbols (bink2_new_ac_symbols). */
 static int new_decode_ac(Bink2Bits *bits, int16_t block[4][64],
                          unsigned cbp, int q,
                          const uint16_t qmat[4][64], int symbols[4])
@@ -344,11 +353,8 @@ static int new_decode_ac(Bink2Bits *bits, int16_t block[4][64],
         bink2_new_read_acs(bits, vals, qmat, q, block_cbp);
         if (bink2_bits_failed(bits))
             return -1;
-        if (symbols != NULL) {
-            symbols[i] = 0;
-            for (j = 1; j < 64; j++)
-                symbols[i] += vals[j] != 0;
-        }
+        if (symbols != NULL)
+            symbols[i] = bink2_new_ac_symbols(vals);
         for (j = 0; j < 64; j++) {
             int64_t level = (int64_t)vals[j] * qmat[q & 3][j] *
                             ((int64_t)1 << (q >> 2));
@@ -741,16 +747,44 @@ static void new_average_chroma(const unsigned char *src, int stride, float *dc)
     }
 }
 
-static void new_idct_add(unsigned char *dst, int stride,
-                         const int16_t block[64])
+/* The value of x in 16-bit two's complement. */
+static int16_t wrap16(int32_t x)
 {
-    int32_t tmp[64];
-    int i;
+    int32_t w = x & 0xFFFF;
 
-    for (i = 0; i < 64; i++)
-        tmp[i] = block[i];
-    bink2_idct_new(tmp);
-    bink2_add_block(dst, stride, tmp);
+    return (int16_t)(w >= 0x8000 ? w - 0x10000 : w);
+}
+
+void bink2_new_add_residual(unsigned char *dst, int stride,
+                            int32_t (*coeffs)[64], const unsigned *words,
+                            int n, unsigned dirs)
+{
+    int16_t res[32 * 32];
+    int k, i;
+
+    for (k = 0; k < n * n; k++) {
+        bink2_idct_new(coeffs[k]);
+        if (!dirs)
+            bink2_add_block(dst + (size_t)(k / n) * 8 * stride +
+                            (k % n) * 8, stride, coeffs[k]);
+    }
+    if (!dirs)
+        return;
+
+    /* Stage R works on the int16 residual. The IDCT output is column
+     * major: sample (row r, column c) of a block is coeffs[c * 8 + r]. */
+    for (k = 0; k < n * n; k++)
+        for (i = 0; i < 64; i++)
+            res[((k / n) * 8 + (i & 7)) * 32 + (k % n) * 8 + (i >> 3)] =
+                wrap16(coeffs[k][i]);
+    bink2_filter_residual(res, 32, n, words, dirs);
+    for (k = 0; k < n * n; k++) {
+        for (i = 0; i < 64; i++)
+            coeffs[k][i] =
+                res[((k / n) * 8 + (i & 7)) * 32 + (k % n) * 8 + (i >> 3)];
+        bink2_add_block(dst + (size_t)(k / n) * 8 * stride + (k % n) * 8,
+                        stride, coeffs[k]);
+    }
 }
 
 static int new_decode_inter_luma(Bink2Video *v, Bink2Slice *s, Bink2Bits *bits,
@@ -758,9 +792,12 @@ static int new_decode_inter_luma(Bink2Video *v, Bink2Slice *s, Bink2Bits *bits,
                                  unsigned char *dst, int stride, int flags)
 {
     int16_t block[4][64];
+    int32_t coeffs[16][64];
+    unsigned words[16];
+    int symbols[4];
     float *dc = s->dc_cur[s->mb_pos].dc[s->comp];
     unsigned cbp;
-    int i, j;
+    int i, j, k;
 
     cbp = bink2_new_read_cbp_luma(bits, *prev_cbp,
                                   (uint32_t)(v->frame_flags & 0x40000));
@@ -773,27 +810,34 @@ static int new_decode_inter_luma(Bink2Video *v, Bink2Slice *s, Bink2Bits *bits,
 
     for (i = 0; i < 4; i++) {
         if (new_decode_ac(bits, block, cbp >> (4 * i), q,
-                          bink2g_inter_qmat, NULL) != 0)
+                          bink2g_inter_qmat, symbols) != 0)
             return -1;
         for (j = 0; j < 4; j++) {
             int pos = bink2_luma_repos[i * 4 + j];
-            int off = (pos & 3) * 8 + (pos >> 2) * 8 * stride;
 
             block[j][0] = (int16_t)(dc[i * 4 + j] * 8.0f + 32.0f);
-            new_idct_add(dst + off, stride, block[j]);
+            for (k = 0; k < 64; k++)
+                coeffs[pos][k] = block[j][k];
+            words[pos] = bink2_filter_residual_word((int)dc[i * 4 + j],
+                                                    symbols[j]);
         }
     }
+    bink2_new_add_residual(dst, stride, coeffs, words, 4,
+                           bink2_filter_residual_dirs(v));
     return 0;
 }
 
-static int new_decode_inter_chroma(Bink2Slice *s, Bink2Bits *bits,
-                                   unsigned *prev_cbp, int q,
+static int new_decode_inter_chroma(Bink2Video *v, Bink2Slice *s,
+                                   Bink2Bits *bits, unsigned *prev_cbp, int q,
                                    unsigned char *dst, int stride)
 {
     int16_t block[4][64];
+    int32_t coeffs[4][64];
+    unsigned words[4];
+    int symbols[4];
     float *dc = s->dc_cur[s->mb_pos].dc[s->comp];
     unsigned cbp;
-    int i;
+    int i, k;
 
     cbp = bink2_new_read_cbp_chroma(bits, *prev_cbp);
     if (bink2_bits_failed(bits))
@@ -801,15 +845,17 @@ static int new_decode_inter_chroma(Bink2Slice *s, Bink2Bits *bits,
     *prev_cbp = cbp;
     if (new_decode_dc(s, bits, 0, q, -1023, 1023, 0xA8) != 0)
         return -1;
-    if (new_decode_ac(bits, block, cbp, q, bink2g_inter_qmat, NULL) != 0)
+    if (new_decode_ac(bits, block, cbp, q, bink2g_inter_qmat, symbols) != 0)
         return -1;
 
     for (i = 0; i < 4; i++) {
-        int off = (i & 1) * 8 + (i >> 1) * 8 * stride;
-
         block[i][0] = (int16_t)(dc[i] * 8.0f + 32.0f);
-        new_idct_add(dst + off, stride, block[i]);
+        for (k = 0; k < 64; k++)
+            coeffs[i][k] = block[i][k];
+        words[i] = bink2_filter_residual_word((int)dc[i], symbols[i]);
     }
+    bink2_new_add_residual(dst, stride, coeffs, words, 2,
+                           bink2_filter_residual_dirs(v));
     return 0;
 }
 
@@ -1007,13 +1053,13 @@ int bink2_video_decode_slice_new(Bink2Video *v, Bink2Slice *s, Bink2Bits *bits,
                         return BINK2_ERROR;
                     if (chroma) {
                         s->comp = 1;
-                        if (new_decode_inter_chroma(s, bits, &u_cbp_inter, q,
+                        if (new_decode_inter_chroma(v, s, bits, &u_cbp_inter, q,
                                                     v->cur[2] +
                                                     (size_t)(y / 2) * v->stride[2] + x / 2,
                                                     v->stride[2]) != 0)
                             return BINK2_ERROR;
                         s->comp = 2;
-                        if (new_decode_inter_chroma(s, bits, &v_cbp_inter, q,
+                        if (new_decode_inter_chroma(v, s, bits, &v_cbp_inter, q,
                                                     v->cur[1] +
                                                     (size_t)(y / 2) * v->stride[1] + x / 2,
                                                     v->stride[1]) != 0)

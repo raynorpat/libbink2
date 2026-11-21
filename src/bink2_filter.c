@@ -165,3 +165,97 @@ void bink2_filter_deblock(Bink2Video *v)
         for (p = 0; p < 3; p++)
             deblock_plane(v, p, 0);
 }
+
+unsigned bink2_filter_residual_dirs(const Bink2Video *v)
+{
+    unsigned dirs = 0;
+
+    if (!v->filters_on ||
+        !bink2_filter_covers(v->version, BINK2_STAGE_RESIDUAL) ||
+        !(v->frame_flags & 0x2000) || (v->frame_flags & 0x40000))
+        return 0;
+    if (!(v->frame_flags & 0x4000))
+        dirs |= BINK2_RES_VERTICAL;
+    if (!(v->frame_flags & 0x8000))
+        dirs |= BINK2_RES_HORIZONTAL;
+    return dirs;
+}
+
+unsigned bink2_filter_residual_word(int dc, int symbols)
+{
+    return (bink2_video_ac_class(symbols) << BINK2_INFO_CLASS_SHIFT) |
+           ((unsigned)dc & BINK2_INFO_DC_MASK);
+}
+
+/* The value of x in 16-bit two's complement. */
+static int wrap16(int x)
+{
+    x &= 0xFFFF;
+    return x >= 0x8000 ? x - 0x10000 : x;
+}
+
+/* The signed 13-bit DC of a word. */
+static int word_dc(unsigned w)
+{
+    int dc = (int)(w & BINK2_INFO_DC_MASK);
+
+    return dc >= 0x1000 ? dc - 0x2000 : dc;
+}
+
+void bink2_filter_residual_edge(int16_t *r2, int across, int along,
+                                unsigned wa, unsigned wb)
+{
+    int ca = (int)(wa >> BINK2_INFO_CLASS_SHIFT) & 3;
+    int cb = (int)(wb >> BINK2_INFO_CLASS_SHIFT) & 3;
+    int line;
+
+    if (ca == 0 && cb == 0)
+        return;
+    if (ca == 3 && cb == 3) {
+        int diff = word_dc(wa) - word_dc(wb);
+
+        if (diff >= -32 && diff <= 32)
+            return;
+    }
+    for (line = 0; line < 8; line++, r2 += along) {
+        int16_t *r0 = r2 - 2 * across;
+        int16_t *r1 = r2 - across;
+        int16_t *r3 = r2 + across;
+        int d = wrap16(*r2 - *r1);
+        int a = floor_div(wrap16(d + 4), 8);
+        int b = floor_div(wrap16(d + 2), 4);
+
+        /* a and b come from the line's original r1 and r2. */
+        if (ca >= 2)
+            *r0 = (int16_t)wrap16(*r0 + a);
+        if (ca >= 1)
+            *r1 = (int16_t)wrap16(*r1 + b);
+        if (cb >= 1)
+            *r2 = (int16_t)wrap16(*r2 - b);
+        if (cb >= 2)
+            *r3 = (int16_t)wrap16(*r3 - a);
+    }
+}
+
+void bink2_filter_residual(int16_t *res, int stride, int n,
+                           const unsigned *words, unsigned dirs)
+{
+    int bx, by;
+
+    /* Footprints within one direction never overlap, so only vertical
+     * before horizontal matters. */
+    if (dirs & BINK2_RES_VERTICAL)
+        for (by = 0; by < n; by++)
+            for (bx = 1; bx < n; bx++)
+                bink2_filter_residual_edge(res + (size_t)(8 * by) * stride +
+                                           8 * bx, 1, stride,
+                                           words[by * n + bx - 1],
+                                           words[by * n + bx]);
+    if (dirs & BINK2_RES_HORIZONTAL)
+        for (by = 1; by < n; by++)
+            for (bx = 0; bx < n; bx++)
+                bink2_filter_residual_edge(res + (size_t)(8 * by) * stride +
+                                           8 * bx, stride, 1,
+                                           words[(by - 1) * n + bx],
+                                           words[by * n + bx]);
+}

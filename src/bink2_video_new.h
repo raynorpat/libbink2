@@ -32,6 +32,22 @@ void bink2_new_read_dcs(Bink2Bits *bits, int32_t dcs[16], int count, int q);
 void bink2_new_read_acs(Bink2Bits *bits, int32_t levels[64],
                         const uint16_t qmat[4][64], int q, uint32_t cbp);
 int bink2_new_read_mv(Bink2Bits *bits, int mvs[4][2], int *nb);
+/** Number of AC symbols in a block read by bink2_new_read_acs: each
+ * symbol is a non-zero level at its own position. */
+int bink2_new_ac_symbols(const int32_t levels[64]);
+
+/*
+ * Reconstruction of one plane of a motion+residual (type 3) macroblock,
+ * shared with the encoder. coeffs[k] holds the dequantised coefficients,
+ * DC included, of block k in raster order (k = by * n + bx; n = 4 for
+ * luma, 2 for chroma) and is used as scratch. Each block is transformed,
+ * the residual is filtered by stage R in the directions `dirs` (from
+ * bink2_filter_residual_dirs) with words[k] (bink2_filter_residual_word),
+ * and the result is added to the prediction at dst with clamping.
+ */
+void bink2_new_add_residual(unsigned char *dst, int stride,
+                            int32_t (*coeffs)[64], const unsigned *words,
+                            int n, unsigned dirs);
 
 /*
  * Predictors for the current macroblock (s->mb_pos), shared with the

@@ -5,6 +5,8 @@
  * pixel deblocking (DB), DC-only block reconstruction (DC) and the inter
  * residual edge filter (R). See docs/rad-filter-design.md. */
 
+#include <stdint.h>
+
 #define BINK2_STAGE_DEBLOCK  0
 #define BINK2_STAGE_DCRECON  1
 #define BINK2_STAGE_RESIDUAL 2
@@ -45,5 +47,36 @@ struct Bink2Video;
  * motion vectors, frame flags and edge arrays of the frame just decoded.
  * Rows from the 16-aligned height on and the alpha plane are not touched. */
 void bink2_filter_deblock(struct Bink2Video *v);
+
+/* ---- Stage R: the residual edge filter of motion+residual macroblocks ---- */
+
+#define BINK2_RES_VERTICAL   1u
+#define BINK2_RES_HORIZONTAL 2u
+
+/* The edge directions stage R filters in the frame v is decoding: none
+ * unless filters are on, the revision is covered, frame flag 0x2000 is set
+ * and 0x40000 is clear; 0x4000 removes the vertical edges and 0x8000 the
+ * horizontal ones. */
+unsigned bink2_filter_residual_dirs(const struct Bink2Video *v);
+
+/* The word stage R uses for an inter block: the class from its number of
+ * decoded AC symbols, shifted by BINK2_INFO_CLASS_SHIFT, over its DC value
+ * (the v for which coefficient 0 is v * 8 + 32) in 13-bit two's
+ * complement. */
+unsigned bink2_filter_residual_word(int dc, int symbols);
+
+/* Filters one 8-line edge of an int16 residual in place. `r2` is the first
+ * sample on the B (right or bottom) side of line 0; `across` and `along`
+ * are as for bink2_filter_db_edge. wa and wb are the words of blocks A and
+ * B. Arithmetic is 16-bit two's complement with no clamping. */
+void bink2_filter_residual_edge(int16_t *r2, int across, int along,
+                                unsigned wa, unsigned wb);
+
+/* Filters the internal 8x8 edges of an n x n block residual (n = 4 for
+ * luma, 2 for chroma) in the directions `dirs`: every vertical edge, then
+ * every horizontal one. words[by * n + bx] belongs to block (bx, by). The
+ * macroblock's outer edges are never touched. */
+void bink2_filter_residual(int16_t *res, int stride, int n,
+                           const unsigned *words, unsigned dirs);
 
 #endif
