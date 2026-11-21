@@ -1,5 +1,6 @@
 #include "bink2_video.h"
 #include "bink2_dsp.h"
+#include "bink2_filter.h"
 
 #include <stdlib.h>
 #include <string.h>
@@ -19,87 +20,117 @@ static unsigned long le32(const unsigned char *p)
            ((unsigned long)p[3] << 24);
 }
 
-static int bits_readz(Bink2Bits *bits, int count)
+int bink2_video_read_edge_flags(Bink2Bits *bits, unsigned char *flags,
+                                int size)
 {
-    if (count <= 0)
-        return 0;
-    return bink2_bits_read(bits, count);
-}
-
-static int skip_block_flags(Bink2Bits *bits, int offset, int size)
-{
-    int flags_left, mode = 0, temp, bits_count, nb_coded;
+    int left = size, pos = 1, value = 0, mode = 0, bit, k;
 
     if (size <= 0)
         return 0;
-    temp = bink2_bits_read1(bits);
-    if (temp < 0)
+    bit = bink2_bits_read1(bits);
+    if (bit < 0)
         return -1;
-    if (temp == 0) {
-        int j;
-
-        for (j = 0; j < (size >> 3); j++) {
-            if (bink2_bits_read(bits, 8) < 0)
+    if (bit == 0) {
+        for (k = 0; k < size; k++) {
+            bit = bink2_bits_read1(bits);
+            if (bit < 0)
                 return -1;
+            flags[pos++] = (unsigned char)bit;
         }
-        if ((size & 7) && bink2_bits_read(bits, size & 7) < 0)
-            return -1;
         return 0;
     }
 
-    flags_left = size;
-    while (flags_left > 0) {
-        temp = bink2_bits_read1(bits);
-        if (temp < 0)
+    /* Run-length coded. Mode 3 (after a run that did not use the longest
+     * extension) flips the value instead of reading it. */
+    while (left > 0) {
+        bit = bink2_bits_read1(bits);
+        if (bit < 0)
             return -1;
-        if (temp == 0) {
-            if (mode != 3) {
-                if (bink2_bits_read1(bits) < 0)
-                    return -1;
-            }
-            mode = 2;
-            if (flags_left < 5) {
-                if (bits_readz(bits, flags_left - 1) < 0)
-                    return -1;
-                offset += flags_left;
-                flags_left = 0;
+        if (bit == 0) {
+            /* The value once, then up to 4 literal flags. */
+            int literal = left < 5 ? left - 1 : 4;
+
+            if (mode == 3) {
+                value = !value;
             } else {
-                if (bink2_bits_read(bits, 4) < 0)
+                value = bink2_bits_read1(bits);
+                if (value < 0)
                     return -1;
-                offset += 5;
-                flags_left -= 5;
             }
-            if (offset >= 8)
-                offset -= 8;
+            flags[pos++] = (unsigned char)value;
+            for (k = 0; k < literal; k++) {
+                bit = bink2_bits_read1(bits);
+                if (bit < 0)
+                    return -1;
+                flags[pos++] = (unsigned char)bit;
+            }
+            left -= literal + 1;
+            mode = 2;
         } else {
-            bits_count = flags_left < 4 ? 2 : flags_left < 16 ? 4 : 5;
-            nb_coded = bits_count + 1;
-            if (mode != 3) {
-                nb_coded++;
-                if (bink2_bits_read1(bits) < 0)
+            int nb = left < 4 ? 2 : left < 16 ? 4 : 5;
+            int len = nb + 1;
+
+            if (mode == 3) {
+                value = !value;
+            } else {
+                value = bink2_bits_read1(bits);
+                if (value < 0)
                     return -1;
+                len++;
             }
-            if (nb_coded > flags_left)
-                nb_coded = flags_left;
-            flags_left -= nb_coded;
-            if (flags_left > 0) {
-                temp = bink2_bits_read(bits, bits_count);
-                if (temp < 0)
+            if (len > left)
+                len = left;
+            if (len < left) {
+                int extra = bink2_bits_read(bits, nb);
+
+                if (extra < 0 || extra > left - len)
                     return -1;
-                flags_left -= temp;
-                nb_coded += temp;
-                mode = temp == (1 << bits_count) - 1 ? 1 : 3;
+                len += extra;
+                mode = extra == (1 << nb) - 1 ? 1 : 3;
             }
-            while (nb_coded > 8)
-                nb_coded -= 8;
-            if (nb_coded > 0) {
-                offset += nb_coded;
-                if (offset >= 8)
-                    offset -= 8;
-            }
+            memset(flags + pos, value, (size_t)len);
+            pos += len;
+            left -= len;
         }
     }
     return 0;
+}
+
+unsigned bink2_video_ac_class(int symbols)
+{
+    if (symbols <= 0)
+        return 3;
+    if (symbols < 4)
+        return 2;
+    if (symbols < 8)
+        return 1;
+    return 0;
+}
+
+void bink2_video_set_info(Bink2Video *v, int p, int x, int y, int bx, int by,
+                          unsigned word)
+{
+    int s = (p == 1 || p == 2) ? 4 : 3;
+
+    v->blk_info[p][(size_t)((y >> s) + by) * v->blk_stride[p] +
+                   (x >> s) + bx] = (uint16_t)word;
+}
+
+void bink2_video_clear_info(Bink2Video *v, int x, int y)
+{
+    int p, r;
+
+    for (p = 0; p < 4; p++) {
+        int s = (p == 1 || p == 2) ? 4 : 3;
+        int n = 32 >> s;
+
+        if (v->blk_info[p] == NULL)
+            continue;
+        for (r = 0; r < n; r++)
+            memset(v->blk_info[p] +
+                   (size_t)((y >> s) + r) * v->blk_stride[p] + (x >> s), 0,
+                   (size_t)n * sizeof(uint16_t));
+    }
 }
 
 int bink2_video_init(Bink2Video *v, unsigned long width, unsigned long height,
@@ -179,10 +210,28 @@ int bink2_video_init(Bink2Video *v, unsigned long width, unsigned long height,
             return -1;
         }
     }
+    for (i = 0; i < 4; i++) {
+        int chroma = i == 1 || i == 2;
+
+        if (i == 3 && !v->has_alpha)
+            continue;
+        v->blk_stride[i] = v->mb_w * (chroma ? 2 : 4);
+        v->blk_info[i] = (uint16_t *)calloc((size_t)v->blk_stride[i] *
+                                            (size_t)v->mb_h * (chroma ? 2 : 4),
+                                            sizeof(uint16_t));
+        if (v->blk_info[i] == NULL) {
+            bink2_video_uninit(v);
+            return -1;
+        }
+    }
+    v->row_size = (int)((((height + 15) & ~15UL) >> 3) - 1);
+    v->col_size = (int)((v->aligned_w >> 3) - 1);
+    v->row_flags = (unsigned char *)calloc((size_t)v->row_size + 1, 1);
+    v->col_flags = (unsigned char *)calloc((size_t)v->col_size + 1, 1);
     v->rgb_size = (size_t)width * height * 3;
     v->rgb = (unsigned char *)calloc(1, v->rgb_size);
     if (v->mv[0] == NULL || v->mv[1] == NULL || v->mv_count == NULL ||
-        v->rgb == NULL) {
+        v->row_flags == NULL || v->col_flags == NULL || v->rgb == NULL) {
         bink2_video_uninit(v);
         return -1;
     }
@@ -198,7 +247,10 @@ void bink2_video_uninit(Bink2Video *v)
     for (i = 0; i < 4; i++) {
         free(v->cur[i]);
         free(v->ref[i]);
+        free(v->blk_info[i]);
     }
+    free(v->row_flags);
+    free(v->col_flags);
     free(v->mv[0]);
     free(v->mv[1]);
     free(v->mv_count);
@@ -402,19 +454,19 @@ static int decode_impl(Bink2Video *v, const unsigned char *data,
         return BINK2_ERROR;
 
     bink2_bits_skip(&bits, 32 * (num_slices - 1));
+    memset(v->row_flags, 0, (size_t)v->row_size + 1);
+    memset(v->col_flags, 0, (size_t)v->col_size + 1);
     if (frame_flags & 0x10000) {
-        if (!(frame_flags & 0x8000)) {
-            int row_size = (int)((((v->height + 15) & ~15UL) >> 3) - 1);
-
-            if (skip_block_flags(&bits, 1, row_size) != 0)
-                return BINK2_ERROR;
-        }
-        if (!(frame_flags & 0x4000)) {
-            int col_size = (int)((((v->width + 31) & ~31UL) >> 3) - 1);
-
-            if (skip_block_flags(&bits, 1, col_size) != 0)
-                return BINK2_ERROR;
-        }
+        if (!(frame_flags & 0x8000) &&
+            bink2_video_read_edge_flags(&bits, v->row_flags,
+                                        v->row_size) != 0)
+            return BINK2_ERROR;
+        if (!(frame_flags & 0x4000) &&
+            bink2_video_read_edge_flags(&bits, v->col_flags,
+                                        v->col_size) != 0)
+            return BINK2_ERROR;
+        if (bits.bitpos > real_size * 8)
+            return BINK2_ERROR;
     }
 
     /* Every slice start is known up front: slice 0 follows the header,
@@ -464,10 +516,21 @@ static int decode_impl(Bink2Video *v, const unsigned char *data,
     if (jobs.end[num_slices - 1] > real_size * 8UL + 64UL)
         return BINK2_ERROR;
 
+    /* In-loop: the filtered picture becomes the next frame's reference. */
+    bink2_video_apply_filters(v);
+
     if (v->cur[3] != NULL && v->ref[3] != NULL)
         memcpy(v->ref[3], v->cur[3], (size_t)v->stride[3] * v->aligned_h);
     v->has_prev = 1;
     return 0;
+}
+
+void bink2_video_apply_filters(Bink2Video *v)
+{
+    if (!v->filters_on)
+        return;
+    if (bink2_filter_covers(v->version, BINK2_STAGE_DEBLOCK))
+        bink2_filter_deblock(v);
 }
 
 #define BINK2_PACKET_KEEP ((size_t)1 << 20)

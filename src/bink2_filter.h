@@ -38,4 +38,12 @@ int bink2_filter_mv_differ(int ax, int ay, int bx, int by);
 void bink2_filter_db_edge(unsigned char *q0, int across, int along,
                           unsigned mask);
 
+struct Bink2Video;
+
+/* Deblocks the frame in cur in place: every enabled vertical edge of Y, U
+ * and V, then every enabled horizontal edge, from the block info words,
+ * motion vectors, frame flags and edge arrays of the frame just decoded.
+ * Rows from the 16-aligned height on and the alpha plane are not touched. */
+void bink2_filter_deblock(struct Bink2Video *v);
+
 #endif

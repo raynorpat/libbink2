@@ -28,6 +28,13 @@ add_executable(test_filter test_filter.c)
 target_link_libraries(test_filter PRIVATE ${BINK2_LINK_TARGET})
 add_test(NAME filter COMMAND test_filter)
 
+add_executable(test_filter_decode test_filter_decode.c)
+target_link_libraries(test_filter_decode PRIVATE ${BINK2_LINK_TARGET})
+target_compile_definitions(test_filter_decode PRIVATE
+  BINK2_FIXTURE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/media")
+add_test(NAME filter_decode COMMAND test_filter_decode)
+set_tests_properties(filter_decode PROPERTIES SKIP_RETURN_CODE 77)
+
 add_executable(test_video test_video.c)
 target_link_libraries(test_video PRIVATE ${BINK2_LINK_TARGET})
 target_compile_definitions(test_video PRIVATE

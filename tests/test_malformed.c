@@ -589,12 +589,75 @@ static int test_mid_slice_recover(void)
     return 0;
 }
 
+static int get_bit(const unsigned char *p, unsigned long i)
+{
+    return (p[i >> 3] >> (i & 7)) & 1;
+}
+
+static void put_bit(unsigned char *p, unsigned long i, int bit)
+{
+    p[i >> 3] = (unsigned char)((p[i >> 3] & ~(1u << (i & 7))) |
+                                ((unsigned)bit << (i & 7)));
+}
+
+/* Frame flag 0x10000 with row/column edge arrays that do not fit. */
+static int test_edge_arrays_overrun(void)
+{
+    unsigned char buf[4096];
+    unsigned char payload[8] = { 0 };
+    unsigned char *fixture;
+    size_t size;
+    int threads;
+    bink2 b;
+
+    for (threads = 1; threads <= 8; threads += 7) {
+        /* The KB2j keyframe's 15-flag row array is raw (16 bits, from bit
+         * 128). Recode it as a run of 6 + r = 15 more flags than are left
+         * (7 bits) and move slice 0 up to follow it, so that the rest of
+         * the frame still decodes. */
+        unsigned long frame0, slice1, i;
+
+        fixture = load_fixture(&size);
+        CHECK(fixture != NULL);
+        frame0 = le32(fixture + 48) & ~1UL;
+        CHECK((le32(fixture + frame0) & 0x1C000UL) == 0x14000UL);
+        slice1 = le32(fixture + frame0 + 4) * 8UL;
+        for (i = 0; i < 7; i++)
+            put_bit(fixture + frame0, 128 + i, 1);
+        for (i = 144; i < slice1; i++)
+            put_bit(fixture + frame0, i - 9,
+                    get_bit(fixture + frame0, i));
+        for (i = slice1 - 9; i < slice1; i++)
+            put_bit(fixture + frame0, i, 0);
+        b = bink2_open_memory(fixture, (unsigned long)size);
+        CHECK(b != NULL);
+        bink2_enable_video(b, 1);
+        bink2_internal_set_threads(b, threads);
+        CHECK(bink2_first(b) == BINK2_ERROR);
+        bink2_close(b);
+        free(fixture);
+
+        /* Raw arrays of 7 and 31 flags need 40 bits; 32 are left. */
+        memset(payload, 0, sizeof(payload));
+        w32(payload, 0x10000UL);
+        size = build_video(buf, 256, 64, 0, payload, sizeof(payload));
+        b = bink2_open_memory(buf, (unsigned long)size);
+        CHECK(b != NULL);
+        bink2_enable_video(b, 1);
+        bink2_internal_set_threads(b, threads);
+        CHECK(bink2_first(b) == BINK2_ERROR);
+        bink2_close(b);
+    }
+    return 0;
+}
+
 int main(void)
 {
     CHECK(test_header_rejects() == 0);
     CHECK(test_slice_memory() == 0);
     CHECK(test_truncated_video() == 0);
     CHECK(test_slice_offset() == 0);
+    CHECK(test_edge_arrays_overrun() == 0);
     CHECK(test_error_then_recover(1) == 0);
     CHECK(test_error_then_recover(8) == 0);
     CHECK(test_slice_overlap() == 0);

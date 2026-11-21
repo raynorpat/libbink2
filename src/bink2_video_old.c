@@ -446,9 +446,11 @@ static int old_decode_dc(Bink2Slice *s, Bink2Bits *bits, int is_luma, int q,
     return 0;
 }
 
+/* symbols, when not NULL, receives each block's number of decoded AC
+ * value symbols, zero values included. */
 static int old_decode_ac(Bink2Bits *bits, const uint8_t *scan,
                          float block[4][64], unsigned cbp, float q,
-                         const float qmat[64])
+                         const float qmat[64], int symbols[4])
 {
     int i;
 
@@ -461,6 +463,8 @@ static int old_decode_ac(Bink2Bits *bits, const uint8_t *scan,
         int idx = 1;
 
         memset(block[i], 0, 64 * sizeof(float));
+        if (symbols != NULL)
+            symbols[i] = 0;
         if (!(cbp & 1))
             continue;
         if (cbp & 0x10000) {
@@ -480,6 +484,8 @@ static int old_decode_ac(Bink2Bits *bits, const uint8_t *scan,
 
             if (val < 0)
                 return -1;
+            if (symbols != NULL)
+                symbols[i]++;
             if (val) {
                 if (val >= 4) {
                     int nbits;
@@ -526,11 +532,26 @@ static int old_decode_ac(Bink2Bits *bits, const uint8_t *scan,
     return 0;
 }
 
-static int old_decode_intra_luma(Bink2Slice *s, Bink2Bits *bits,
-                                 unsigned *prev_cbp, int *prev_q,
-                                 unsigned char *dst, int stride, int flags)
+/* The intra info word of a block. Y and alpha round the DC with RAD's
+ * single-precision bias; chroma truncates it. */
+static unsigned old_intra_word(float dc, int symbols, int round)
 {
+    float r = dc + (round ? 0.49999991f : 0.0f);
+
+    return BINK2_INFO_INTRA |
+           (bink2_video_ac_class(symbols) << BINK2_INFO_CLASS_SHIFT) |
+           ((unsigned)(int)r & 0xFFFu);
+}
+
+static int old_decode_intra_luma(Bink2Video *v, Bink2Slice *s,
+                                 Bink2Bits *bits, unsigned *prev_cbp,
+                                 int *prev_q, int plane, int x, int y,
+                                 int flags)
+{
+    int stride = v->stride[plane];
+    unsigned char *dst = v->cur[plane] + (size_t)y * stride + x;
     float block[4][64];
+    int symbols[4];
     float *dc = s->dc_cur[s->mb_pos].dc[s->comp];
     unsigned cbp;
     int q, dq, i, j;
@@ -549,7 +570,7 @@ static int old_decode_intra_luma(Bink2Slice *s, Bink2Bits *bits,
 
     for (i = 0; i < 4; i++) {
         if (old_decode_ac(bits, luma_scan, block, cbp >> (4 * i),
-                          ac_quant[q], luma_intra_qmat) != 0)
+                          ac_quant[q], luma_intra_qmat, symbols) != 0)
             return -1;
         for (j = 0; j < 4; j++) {
             int pos = luma_repos[i * 4 + j];
@@ -558,16 +579,23 @@ static int old_decode_intra_luma(Bink2Slice *s, Bink2Bits *bits,
             block[j][0] = dc[i * 4 + j] * 0.125f;
             bink2_idct_old(block[j]);
             bink2_put_block_f(dst + off, stride, block[j]);
+            bink2_video_set_info(v, plane, x, y, pos & 3, pos >> 2,
+                                 old_intra_word(dc[i * 4 + j], symbols[j],
+                                                1));
         }
     }
     return 0;
 }
 
-static int old_decode_intra_chroma(Bink2Slice *s, Bink2Bits *bits,
-                                   unsigned *prev_cbp, int *prev_q,
-                                   unsigned char *dst, int stride, int flags)
+static int old_decode_intra_chroma(Bink2Video *v, Bink2Slice *s,
+                                   Bink2Bits *bits, unsigned *prev_cbp,
+                                   int *prev_q, int plane, int x, int y,
+                                   int flags)
 {
+    int stride = v->stride[plane];
+    unsigned char *dst = v->cur[plane] + (size_t)(y / 2) * stride + x / 2;
     float block[4][64];
+    int symbols[4];
     float *dc = s->dc_cur[s->mb_pos].dc[s->comp];
     unsigned cbp;
     int q, dq, i;
@@ -584,7 +612,7 @@ static int old_decode_intra_chroma(Bink2Slice *s, Bink2Bits *bits,
     if (old_decode_dc(s, bits, 0, q, 0, 2047, flags) != 0)
         return -1;
     if (old_decode_ac(bits, chroma_scan, block, cbp, ac_quant[q],
-                      chroma_qmat) != 0)
+                      chroma_qmat, symbols) != 0)
         return -1;
 
     for (i = 0; i < 4; i++) {
@@ -593,6 +621,8 @@ static int old_decode_intra_chroma(Bink2Slice *s, Bink2Bits *bits,
         block[i][0] = dc[i] * 0.125f;
         bink2_idct_old(block[i]);
         bink2_put_block_f(dst + off, stride, block[i]);
+        bink2_video_set_info(v, plane, x, y, i & 1, i >> 1,
+                             old_intra_word(dc[i], symbols[i], 0));
     }
     return 0;
 }
@@ -831,7 +861,7 @@ static int old_decode_inter_luma(Bink2Slice *s, Bink2Bits *bits,
 
     for (i = 0; i < 4; i++) {
         if (old_decode_ac(bits, luma_scan, block, cbp >> (4 * i),
-                          ac_quant[q], luma_inter_qmat) != 0)
+                          ac_quant[q], luma_inter_qmat, NULL) != 0)
             return -1;
         for (j = 0; j < 4; j++) {
             int pos = luma_repos[i * 4 + j];
@@ -866,7 +896,7 @@ static int old_decode_inter_chroma(Bink2Slice *s, Bink2Bits *bits,
     if (old_decode_dc(s, bits, 0, q, -1023, 1023, 0xA8) != 0)
         return -1;
     if (old_decode_ac(bits, chroma_scan, block, cbp, ac_quant[q],
-                      chroma_qmat) != 0)
+                      chroma_qmat, NULL) != 0)
         return -1;
 
     for (i = 0; i < 4; i++) {
@@ -1039,38 +1069,30 @@ int bink2_video_decode_slice_old(Bink2Video *v, Bink2Slice *s, Bink2Bits *bits,
                 memset(raw, 0, sizeof(raw));
                 old_predict_mv(s, flags, raw);
                 s->comp = 0;
-                if (old_decode_intra_luma(s, bits, &y_cbp_intra,
-                                          &y_q_intra,
-                                          v->cur[0] +
-                                          (size_t)y * v->stride[0] + x,
-                                          v->stride[0], flags) != 0)
+                if (old_decode_intra_luma(v, s, bits, &y_cbp_intra,
+                                          &y_q_intra, 0, x, y, flags) != 0)
                     return BINK2_ERROR;
                 s->comp = 1;
-                if (old_decode_intra_chroma(s, bits, &u_cbp_intra,
-                                            &u_q_intra,
-                                            v->cur[2] +
-                                            (size_t)(y / 2) * v->stride[2] + x / 2,
-                                            v->stride[2], flags) != 0)
+                if (old_decode_intra_chroma(v, s, bits, &u_cbp_intra,
+                                            &u_q_intra, 2, x, y,
+                                            flags) != 0)
                     return BINK2_ERROR;
                 s->comp = 2;
-                if (old_decode_intra_chroma(s, bits, &v_cbp_intra,
-                                            &v_q_intra,
-                                            v->cur[1] +
-                                            (size_t)(y / 2) * v->stride[1] + x / 2,
-                                            v->stride[1], flags) != 0)
+                if (old_decode_intra_chroma(v, s, bits, &v_cbp_intra,
+                                            &v_q_intra, 1, x, y,
+                                            flags) != 0)
                     return BINK2_ERROR;
                 if (v->has_alpha) {
                     s->comp = 3;
-                    if (old_decode_intra_luma(s, bits, &a_cbp_intra,
-                                              &a_q_intra,
-                                              v->cur[3] +
-                                              (size_t)y * v->stride[3] + x,
-                                              v->stride[3], flags) != 0)
+                    if (old_decode_intra_luma(v, s, bits, &a_cbp_intra,
+                                              &a_q_intra, 3, x, y,
+                                              flags) != 0)
                         return BINK2_ERROR;
                 }
                 break;
             case 1:
                 bink2_video_copy_mb(v, x, y);
+                bink2_video_clear_info(v, x, y);
                 break;
             case 2:
             case 3:
@@ -1080,6 +1102,7 @@ int bink2_video_decode_slice_old(Bink2Video *v, Bink2Slice *s, Bink2Bits *bits,
                 bink2_video_mc_luma(v, s, x, y);
                 bink2_video_mc_chroma(v, s, x, y);
                 bink2_video_store_motion(v, s, x, y, 4);
+                bink2_video_clear_info(v, x, y);
                 if (type == 3) {
                     s->comp = 0;
                     if (old_decode_inter_luma(s, bits, &y_cbp_inter,

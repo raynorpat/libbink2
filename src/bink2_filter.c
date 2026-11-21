@@ -1,4 +1,5 @@
 #include "bink2_filter.h"
+#include "bink2_video.h"
 
 int bink2_filter_covers(int version, int stage)
 {
@@ -80,4 +81,87 @@ void bink2_filter_db_edge(unsigned char *q0, int across, int along,
         if (mask & BINK2_DB_TAP_Q1)
             *q1 = clamp255(*q1 - a);
     }
+}
+
+/* Motion vector of the 16x16 luma quadrant holding luma pixel (x, y). */
+static void quadrant_mv(const Bink2Video *v, int x, int y, int *mx, int *my)
+{
+    size_t k = ((size_t)(y >> 5) * v->mb_w + (x >> 5)) * 4 +
+               (size_t)(((x >> 4) & 1) | (((y >> 4) & 1) << 1));
+
+    *mx = v->mv[0][k];
+    *my = v->mv[1][k];
+}
+
+/* Taps for the edge segment between blocks with words wp and wq. (px, py)
+ * and (qx, qy) are luma pixels on either side of the edge, used when both
+ * macroblocks are non-intra; on16 says the edge is on a 16-pixel luma
+ * boundary (every chroma edge is). */
+static unsigned edge_mask(const Bink2Video *v, unsigned wp, unsigned wq,
+                          int on16, int px, int py, int qx, int qy)
+{
+    int ax, ay, bx, by;
+
+    if ((wp | wq) & BINK2_INFO_INTRA)
+        return bink2_filter_db_class_mask(
+            (int)(wp >> BINK2_INFO_CLASS_SHIFT) & 3,
+            (int)(wq >> BINK2_INFO_CLASS_SHIFT) & 3);
+    if (!on16)
+        return 0;
+    quadrant_mv(v, px, py, &ax, &ay);
+    quadrant_mv(v, qx, qy, &bx, &by);
+    return bink2_filter_mv_differ(ax, ay, bx, by) ? BINK2_DB_TAPS_ALL : 0;
+}
+
+/* One direction of one plane. Block (j, i) is the jth 8x8 block of the
+ * ith block row; the edge before it lies on luma column or row 8j << s or
+ * 8i << s, which also indexes the edge arrays. */
+static void deblock_plane(Bink2Video *v, int p, int vertical)
+{
+    int s = p ? 1 : 0;
+    int cols = (int)(v->aligned_w >> 3) >> s;
+    int rows = (int)(((v->height + 15) & ~15UL) >> 3) >> s;
+    int stride = v->stride[p];
+    const uint16_t *info = v->blk_info[p];
+    int bs = v->blk_stride[p];
+    int i, j;
+
+    for (i = vertical ? 0 : 1; i < rows; i++) {
+        int ly = (8 * i) << s;
+
+        if (!vertical && v->row_flags[i << s])
+            continue;
+        for (j = vertical ? 1 : 0; j < cols; j++) {
+            int lx = (8 * j) << s;
+            unsigned char *q0 = v->cur[p] + (size_t)(8 * i) * stride + 8 * j;
+            unsigned mask;
+
+            if (vertical) {
+                if (v->col_flags[j << s])
+                    continue;
+                mask = edge_mask(v, info[i * bs + j - 1], info[i * bs + j],
+                                 s || !(j & 1), lx - 1, ly, lx, ly);
+                if (mask)
+                    bink2_filter_db_edge(q0, 1, stride, mask);
+            } else {
+                mask = edge_mask(v, info[(i - 1) * bs + j], info[i * bs + j],
+                                 s || !(i & 1), lx, ly - 1, lx, ly);
+                if (mask)
+                    bink2_filter_db_edge(q0, stride, 1, mask);
+            }
+        }
+    }
+}
+
+void bink2_filter_deblock(Bink2Video *v)
+{
+    int p;
+
+    /* Every vertical edge before any horizontal one. */
+    if (!(v->frame_flags & 0x4000))
+        for (p = 0; p < 3; p++)
+            deblock_plane(v, p, 1);
+    if (!(v->frame_flags & 0x8000))
+        for (p = 0; p < 3; p++)
+            deblock_plane(v, p, 0);
 }
