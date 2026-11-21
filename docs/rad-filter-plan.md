@@ -3,7 +3,8 @@
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Study RAD's `bink2w32.dll` statically, hand off behaviour notes,
-and implement the deblocking and DC reconstruction stages from those notes,
+and implement the residual edge filter, DC reconstruction, and deblocking
+stages from those notes,
 on by default with an opt-out.
 
 **Architecture:** Phase 1 (Tasks 1–4) runs outside the repository and ends
@@ -191,15 +192,15 @@ enough. The RAR is extracted with `unar` (installed).
 
 **Interfaces:**
 - Produces: `int bink2_filter_covers(int version, int stage);` where
-  `stage` is `BINK2_STAGE_DEBLOCK` (0) or `BINK2_STAGE_DCRECON` (1). It
-  returns 1 exactly for the revisions the approved notes mark covered.
+  `stage` is `BINK2_STAGE_DEBLOCK` (0), `BINK2_STAGE_DCRECON` (1), or
+  `BINK2_STAGE_RESIDUAL` (2). It returns 1 exactly for the revisions the
+  approved notes mark covered for that stage.
 - Produces: one pure edge or block primitive with the signature the notes
   imply. It works on caller-owned pixel memory with an explicit stride or
   step and the notes' parameters, does no allocation, and does not touch
   `Bink2Video`.
-- Produces: `void bink2_filter_deblock(Bink2Video *v);`. It applies the
-  stage to the planes the notes name, in the notes' edge order, using the
-  stored per-frame state from Task 7.
+- (Ledger ruling: the frame-level `bink2_filter_deblock` and any per-frame
+  state move to Task 7.)
 
 - [ ] **Step 1:** Write `test_filter.c`. There is one test per worked
   example in the notes, named `deblock_example_<n>`. Each builds the
@@ -213,8 +214,7 @@ enough. The RAR is extracted with `unar` (installed).
 - [ ] **Step 4:** Run `ctest -R '^filter$'`. Expected: PASS. If an example
   disagrees, stop and report which one. Do not change the expected values:
   the notes are the reference.
-- [ ] **Step 5:** Implement `bink2_filter_deblock` as a loop over edges that
-  calls the primitive. Commit: `feat: add the deblocking filter primitive`.
+- [ ] **Step 5:** Commit: `feat: add the deblocking filter primitive`.
 
 ### Task 7: Run deblocking in the decoder
 
@@ -228,9 +228,11 @@ enough. The RAR is extracted with `unar` (installed).
 **Interfaces:**
 - Consumes: `bink2_filter_covers`, `bink2_filter_deblock`, and
   `Bink2Video.filters_on` (Tasks 5 and 6).
-- Produces: `void bink2_video_apply_filters(Bink2Video *v);`. It runs every
-  approved, covered stage on the just-decoded frame when `v->filters_on` is
-  set. `Bink2Video` gains `unsigned char *row_flags, *col_flags` (sizes
+- Produces: `void bink2_filter_deblock(Bink2Video *v);` (the frame loop
+  over the Task 6 primitive, in the notes' edge order) and
+  `void bink2_video_apply_filters(Bink2Video *v);`. The latter runs the
+  covered whole-frame stages on the just-decoded frame when `v->filters_on`
+  is set, in the notes' order: DC (Task 8) first, then DB. `Bink2Video` gains `unsigned char *row_flags, *col_flags` (sizes
   `row_size` and `col_size` as computed in `decode_impl`) if the arrays are
   used.
 - If the notes say the stage is in-loop, it runs in place on `cur` after
@@ -278,6 +280,39 @@ enough. The RAR is extracted with `unar` (installed).
   and `build-scalar` (the last with `BINK2_THREADS=1`), with media.
   Expected: all pass, and the reference tests are unchanged. Commit:
   `feat: apply the deblocking filter on decode`.
+
+### Task 7b: Residual edge filter (stage R)
+
+Approved by the owner in Task 4. It was not in the original design. See the
+notes' "Stage R" section.
+
+**Files:** `src/bink2_filter.c`, `src/bink2_filter.h`,
+`src/bink2_video_new.c` (the inter motion+residual macroblock path),
+`src/encoder/bink2_enc_video.c` (its matching inter residual path),
+`tests/test_filter.c`, `tests/test_filter_decode.c`
+
+**Interfaces:**
+- Produces: the notes' residual primitive, which works on a caller-owned
+  int16 residual block with an explicit stride and the notes' parameters.
+  It is called inside macroblock decode after the IDCT and before the
+  residual is added to the prediction, for every plane the notes list
+  (alpha included), when `v->filters_on` is set, the revision is covered
+  for `BINK2_STAGE_RESIDUAL`, and the frame flags the notes name don't
+  disable it.
+- The encoder's inter residual reconstruction calls the same primitive
+  under the same conditions (Rule 2). It must not copy it.
+
+- [ ] **Step 1:** Add `residual_example_<n>` tests from the notes' worked
+  examples, and extend `covers_matches_notes` to `BINK2_STAGE_RESIDUAL`.
+  Run `ctest -R '^filter$'`. Expected: FAIL.
+- [ ] **Step 2:** Implement the primitive and call it from the decoder's
+  inter residual path.
+- [ ] **Step 3:** Call it from the encoder's matching path. Run
+  `ctest -R '^(filter|filter_decode|enc_inter|enc_api)$'` with media.
+  Expected: PASS.
+- [ ] **Step 4:** Run the four build variants as in Task 7, Step 5.
+  Expected: PASS, and the reference tests are unchanged. Commit:
+  `feat: filter inter residual edges on decode`.
 
 ### Task 8: DC reconstruction stage
 

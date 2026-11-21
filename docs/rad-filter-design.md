@@ -37,6 +37,16 @@ That material is unlicensed RAD property. It is never committed, never
 copied into the repository tree, and never linked or loaded by anything in
 the repository.
 
+## Addendum (after the study)
+
+The study found a third RAD stage: an edge filter on the inter residual
+(stage R). It runs inside macroblock decode, after the IDCT and before the
+residual is added to the prediction. The owner approved all three stages
+(R, DC, DB) and the notes' four inferred claims on 2026-11-20. Wherever this
+design says "both stages", read "the approved stages". Stage R is
+implemented by the plan's Task 7b. The encoder calls it from its inter
+residual path under the same conditions as the decoder.
+
 ## Goals
 
 - Notes good enough to implement both stages without looking at the binary.
