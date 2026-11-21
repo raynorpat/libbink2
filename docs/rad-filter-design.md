@@ -1,6 +1,7 @@
 # Closing the RAD divergences: deblocking and DC reconstruction
 
-Status: design, not yet implemented.
+Status: implemented. The three stages are in `src/bink2_filter.c`; see
+`docs/architecture.md` and `docs/bink2.md`.
 
 ## Intent
 

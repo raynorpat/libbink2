@@ -111,9 +111,13 @@ tests/media/synthetic_kb2j.bk2: 160x120, 32 frames, 25.000 fps
 frame 0 y=11899069354599489311 u=2874139801710016741 v=14167469714912273877
 ```
 
-These are the same hashes as the golden values in
+With `--no-filters` these are the same hashes as the golden values in
 `tests/reference_checksums.h`, which makes the tool useful for locating the
-first frame that diverges from a reference.
+first frame that diverges from the FFmpeg reference. The default output has
+the filters on and matches `tests/filtered_checksums.h` instead; on the
+sample files it differs from the golden values from the first frames on,
+which is not a bug. The example above prints the same hashes either way,
+because the filters change nothing in the KB2j fixture.
 
 Exit codes: `0` success, `1` open, decode, or write failure, `2` bad command
 line.

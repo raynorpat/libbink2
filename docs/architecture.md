@@ -30,7 +30,7 @@ docs/                format notes, API and tool reference
 | `bink2_video_new.c/.h` | `KB2g`+ slice syntax (integer IDCT, LRU block types). |
 | `bink2_dsp.c/.h` | IDCTs, block put/add, motion compensation, YUV to RGB rows; scalar `*_c` references and the dispatch to SIMD. |
 | `bink2_dsp_neon.c`, `bink2_dsp_sse2.c` | NEON and SSE2 versions of the DSP routines, compiled in when the target has them. |
-| `bink2_filter.c/.h` | RAD's post-reconstruction stages: which revisions each stage covers, the deblocking edge primitive, and the whole-frame deblocking pass. `bink2_video_apply_filters()` runs the pass in place on each decoded frame after all slices finish, so the filtered picture is the next reference. It reads the per-8x8 block info words and `0x10000` edge arrays the slice decoders store in `Bink2Video` (see `bink2_video.h`). |
+| `bink2_filter.c/.h` | RAD's post-reconstruction stages: which revisions each stage covers; the residual edge filter (stage R), which the `KB2g`+ slice decoder applies to the inverse-transformed residual before adding it to the prediction; DC reconstruction of DC-only intra blocks; and deblocking, with its edge primitive. `bink2_video_apply_filters()` runs DC reconstruction and then deblocking in place on each decoded frame after all slices finish, so the filtered picture is the next reference. It reads the per-8x8 block info words and `0x10000` edge arrays the slice decoders store in `Bink2Video` (see `bink2_video.h`). |
 | `bink2_tables.c/.h` | Codebooks, scan orders, quantiser matrices. |
 | `bink2_audio.c/.h` | Bink Audio 2. |
 | `bink2_thread.c/.h` | The slice thread pool (POSIX or Win32 threads), CPU count, `BINK2_THREADS`. |

@@ -1,5 +1,7 @@
 # RAD Divergences Implementation Plan
 
+Status: implemented; see `docs/rad-filter-design.md`.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Study RAD's `bink2w32.dll` statically, hand off behaviour notes,
