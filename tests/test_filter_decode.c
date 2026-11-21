@@ -952,7 +952,9 @@ static int test_error_restores_filtered(const Blob *in)
  * array of ones, or 0x4000 | 0x8000), so DB may touch nothing: every byte
  * of every plane, padding included, matches an unfiltered decode that
  * runs only stage DC after each frame. Stage DC is in-loop, so its output
- * is that decode's next reference too. */
+ * is that decode's next reference too. The fixture has no DC-only blocks,
+ * so DC changes nothing here either and the comparison would also hold
+ * without the call; dcrecon_frame covers DC's own bounds. */
 static int test_border_planes_bounded(void)
 {
     Blob in;

@@ -62,7 +62,9 @@ int main(void)
     bink2 b;
 
     /* The KB2j fixture ships with the repo, so check it even when no
-     * external media directory is configured. */
+     * external media directory is configured. The filters change nothing
+     * in it (see tests/README.md), so these values equal the reference
+     * ones; the samples below are what exercise the filters. */
     CHECK(check_file(BINK2_FIXTURE_DIR "/synthetic_kb2j.bk2",
                      bink2_kb2j_filtered_checksums, 32, "kb2j") == 0);
 

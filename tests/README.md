@@ -31,6 +31,14 @@ behaviour, not a correctness reference, because the pinned oracle does not
 implement the filters. `test_decode_filtered` compares against it; the KB2j
 part always runs, the sample part skips (exit 77) without `BINK2_TEST_MEDIA`.
 
+The KB2j entries equal the KB2j values in `reference_checksums.h`. The
+fixture has no DC-only blocks, and its frame flags turn deblocking and the
+residual edge filter off, so a filtered decode is byte-identical to an
+unfiltered one, padding included. The KB2j array therefore pins only that
+the filters leave this fixture alone; the filter stages are exercised by the
+two sample files, by `test_filter_decode`, `test_block_info`, and by
+`test_enc_inter`, whose clip has DC-only blocks.
+
 Regenerate after building with `BINK2_BUILD_TOOLS=ON`:
 
 ```sh
